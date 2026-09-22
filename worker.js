@@ -135,6 +135,24 @@ async function fetchHoursRaw(token, from, to) {
   throw lastError;
 }
 
+// Prueba una lista de URLs contra la API de Jibble y devuelve status + un
+// fragmento del cuerpo de cada una, sin lanzar error. Sirve para descubrir
+// el nombre real de un endpoint cuando no se puede acceder a la doc oficial.
+async function probeUrls(urls, token) {
+  const results = await Promise.all(
+    urls.map(async (url) => {
+      try {
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        const text = await res.text().catch(() => "");
+        return { url, status: res.status, ok: res.ok, body: text.slice(0, 600) };
+      } catch (e) {
+        return { url, status: null, ok: false, body: String(e.message || e).slice(0, 300) };
+      }
+    })
+  );
+  return results;
+}
+
 function currentWeekRangeChile() {
   // Lunes a domingo, hora de Santiago (UTC-3/UTC-4 según horario de verano).
   const now = new Date();
@@ -212,7 +230,33 @@ export default {
         return json({ from, to, people, horasEndpointUsado: hours.url, horasRaw: hours.payload });
       }
 
-      return json({ error: "Ruta no encontrada. Usa GET /horas-semana o GET /debug." }, 404);
+      if (url.pathname === "/discover" && request.method === "GET") {
+        // Prueba endpoints candidatos de horas/timesheets para encontrar el real.
+        const token = await getJibbleToken(env);
+        const bases = [
+          "https://time-tracking.prod.jibble.io/v1",
+          "https://workspace.prod.jibble.io/v1",
+        ];
+        const names = [
+          "", // raíz OData: suele listar los entity sets disponibles
+          "Activities",
+          "ActivityEntries",
+          "TimeEntries",
+          "HoursEntries",
+          "Entries",
+          "Attendances",
+          "TimesheetEntries",
+          "ClockEntries",
+          "WorkedHours",
+          "Reports",
+          "TimeTracking",
+        ];
+        const urls = bases.flatMap((base) => names.map((n) => (n ? `${base}/${n}` : `${base}/`)));
+        const results = await probeUrls(urls, token);
+        return json({ results });
+      }
+
+      return json({ error: "Ruta no encontrada. Usa GET /horas-semana, GET /debug o GET /discover." }, 404);
     } catch (err) {
       const status = err.status || 500;
       return json({ error: err.message || "Error interno" }, status);
