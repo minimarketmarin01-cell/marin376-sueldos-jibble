@@ -205,6 +205,9 @@
     font-size: 17px;
     margin: 0;
   }
+  .card-head-name{
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0;
+  }
   .hours-pill{
     font-size: 12px;
     color: var(--ink-muted);
@@ -279,6 +282,47 @@
     font-size: 14px;
     font-family: "IBM Plex Mono", monospace;
   }
+
+  .mode-row{
+    display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
+  }
+  .mode-row label{ font-size: 12px; color: var(--ink-muted); flex: none; }
+  .mode-row select{
+    flex: 1;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 13px;
+  }
+
+  .paid-badge{
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 9px;
+    border-radius: 999px;
+    white-space: nowrap;
+    flex: none;
+  }
+  .card.paid{ border-color: var(--accent); }
+
+  .paid-row{
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px dashed var(--border);
+    font-size: 13px;
+    color: var(--ink-muted);
+  }
+  .paid-row input[type="checkbox"]{
+    width: 18px; height: 18px;
+    accent-color: var(--accent);
+    flex: none;
+  }
+  .paid-row label{ cursor: pointer; }
 
   .breakdown{
     display: grid;
@@ -452,6 +496,27 @@
     try{ localStorage.setItem("planilla.sueldos", JSON.stringify(map)); }catch(e){}
   }
 
+  function loadModos(){
+    try{
+      var raw = localStorage.getItem("planilla.modoPago");
+      return raw ? JSON.parse(raw) : {};
+    }catch(e){ return {}; }
+  }
+  function saveModos(map){
+    try{ localStorage.setItem("planilla.modoPago", JSON.stringify(map)); }catch(e){}
+  }
+
+  // fecha (from-to de la semana) -> true si ya se pago.
+  function loadPagadas(){
+    try{
+      var raw = localStorage.getItem("planilla.semanasPagadas");
+      return raw ? JSON.parse(raw) : {};
+    }catch(e){ return {}; }
+  }
+  function savePagadas(map){
+    try{ localStorage.setItem("planilla.semanasPagadas", JSON.stringify(map)); }catch(e){}
+  }
+
   var CLP = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
   function fmtCLP(n){ return CLP.format(Math.round(n || 0)); }
   function fmtHoras(n){ return (Math.round((n||0) * 10) / 10).toLocaleString("es-CL") + " h"; }
@@ -505,6 +570,9 @@
   }
 
   var DEFAULT_SALARIES = { "Marlene Salazar": 553553 };
+  // "porHora": se paga valorHora x todas las horas trabajadas, sin tope ni extra.
+  // "conExtra": horas normales hasta el tope + horas por sobre el tope a extraRate.
+  var DEFAULT_MODOS = { "Marlene Salazar": "porHora" };
 
   function buildExampleData(days){
     var iso = function(i){ return days[i].iso; };
@@ -545,6 +613,11 @@
   for(var defaultName in DEFAULT_SALARIES){
     if(!(defaultName in salaries)) salaries[defaultName] = DEFAULT_SALARIES[defaultName];
   }
+  var modos = loadModos();
+  for(var defaultModoName in DEFAULT_MODOS){
+    if(!(defaultModoName in modos)) modos[defaultModoName] = DEFAULT_MODOS[defaultModoName];
+  }
+  var pagadas = loadPagadas();
 
   var todayIso = fmtISO(chileNowDate());
   var currentWeekMonday = mondayOf(chileNowDate());
@@ -596,14 +669,24 @@
     var cap = Number(config.weeklyCap) || 42;
     var extraRate = Number(config.extraRate) || 0;
     var horas = entry.horasTrabajadas || 0;
-    var horasNormales = Math.min(horas, cap);
-    var horasExtra = Math.max(0, horas - cap);
+    var modo = modos[entry.nombre] || "conExtra";
     var sueldoMensual = salaries[entry.nombre] || 0;
     var valorHora = sueldoMensual > 0 ? sueldoMensual / 4.33 / cap : 0;
+
+    var horasNormales, horasExtra, pagoExtra;
+    if(modo === "porHora"){
+      // Se paga por hora, sin tope ni recargo: todas las horas al mismo valor.
+      horasNormales = horas;
+      horasExtra = 0;
+      pagoExtra = 0;
+    }else{
+      horasNormales = Math.min(horas, cap);
+      horasExtra = Math.max(0, horas - cap);
+      pagoExtra = horasExtra * extraRate;
+    }
     var pagoNormal = valorHora * horasNormales;
-    var pagoExtra = horasExtra * extraRate;
     var total = pagoNormal + pagoExtra;
-    return { horas: horas, horasNormales: horasNormales, horasExtra: horasExtra, sueldoMensual: sueldoMensual, valorHora: valorHora, pagoNormal: pagoNormal, pagoExtra: pagoExtra, total: total };
+    return { horas: horas, modo: modo, horasNormales: horasNormales, horasExtra: horasExtra, sueldoMensual: sueldoMensual, valorHora: valorHora, pagoNormal: pagoNormal, pagoExtra: pagoExtra, total: total };
   }
 
   function renderWeekGrid(porDia){
@@ -636,17 +719,17 @@
       var pctNormal = calc.horas > 0 ? Math.min(calc.horasNormales / cap, 1) * 100 : 0;
       var pctExtra = calc.horas > 0 ? (calc.horasExtra / cap) * 100 : 0;
 
+      var safeId = entry.nombre.replace(/[^a-zA-Z0-9]/g, "_");
+      var salaryId = "sal-" + safeId;
+      var modeId = "mode-" + safeId;
+      var paidId = "paid-" + safeId;
+      var paidKey = week.from + "|" + entry.nombre;
+      var isPaid = !!pagadas[paidKey];
+
       var card = document.createElement("div");
-      card.className = "card";
+      card.className = "card" + (isPaid ? " paid" : "");
 
-      var salaryId = "sal-" + entry.nombre.replace(/[^a-zA-Z0-9]/g, "_");
-
-      card.innerHTML =
-        '<div class="card-head">' +
-          '<h2>' + escapeHtml(entry.nombre) + '</h2>' +
-          '<span class="hours-pill num">' + fmtHoras(calc.horas) + '</span>' +
-        '</div>' +
-        renderWeekGrid(entry.porDia) +
+      var barBlock = calc.modo === "porHora" ? "" :
         '<div class="bar" aria-hidden="true">' +
           '<div class="seg-normal" style="width:' + pctNormal + '%"></div>' +
           '<div class="seg-extra" style="width:' + pctExtra + '%"></div>' +
@@ -654,19 +737,48 @@
         '<div class="legend">' +
           '<span><span class="dot normal"></span>Normal (tope ' + cap + ' h)</span>' +
           '<span><span class="dot extra"></span>Extra</span>' +
+        '</div>';
+
+      var breakdownBlock = calc.modo === "porHora" ?
+        '<div class="breakdown">' +
+          '<div class="item"><div class="k">Horas trabajadas</div><div class="v num">' + fmtHoras(calc.horas) + '</div></div>' +
+          '<div class="item"><div class="k">Valor hora</div><div class="v num">' + fmtCLP(calc.valorHora) + '</div></div>' +
+        '</div>' :
+        '<div class="breakdown">' +
+          '<div class="item"><div class="k">Horas normales</div><div class="v num">' + fmtHoras(calc.horasNormales) + '</div></div>' +
+          '<div class="item"><div class="k">Horas extra</div><div class="v num">' + fmtHoras(calc.horasExtra) + '</div></div>' +
+          '<div class="item"><div class="k">Pago normal</div><div class="v num">' + fmtCLP(calc.pagoNormal) + '</div></div>' +
+          '<div class="item"><div class="k">Pago extra</div><div class="v num">' + fmtCLP(calc.pagoExtra) + '</div></div>' +
+        '</div>';
+
+      card.innerHTML =
+        '<div class="card-head">' +
+          '<div class="card-head-name">' +
+            '<h2>' + escapeHtml(entry.nombre) + '</h2>' +
+            (isPaid ? '<span class="paid-badge">✓ Pagada</span>' : '') +
+          '</div>' +
+          '<span class="hours-pill num">' + fmtHoras(calc.horas) + '</span>' +
+        '</div>' +
+        renderWeekGrid(entry.porDia) +
+        barBlock +
+        '<div class="mode-row">' +
+          '<label for="' + modeId + '">Modo de pago</label>' +
+          '<select id="' + modeId + '">' +
+            '<option value="conExtra"' + (calc.modo === "conExtra" ? " selected" : "") + '>Normal + extra sobre tope</option>' +
+            '<option value="porHora"' + (calc.modo === "porHora" ? " selected" : "") + '>Por hora (sin tope ni extra)</option>' +
+          '</select>' +
         '</div>' +
         '<div class="salary-row">' +
           '<label for="' + salaryId + '">Sueldo mensual</label>' +
           '<div class="input-wrap"><span>$</span><input id="' + salaryId + '" type="number" inputmode="numeric" step="1000" value="' + (calc.sueldoMensual || "") + '" placeholder="0"></div>' +
         '</div>' +
         (calc.sueldoMensual > 0 ? '' : '<p class="empty-hint">Ingresa el sueldo mensual para calcular el pago.</p>') +
-        '<div class="breakdown">' +
-          '<div class="item"><div class="k">Horas normales</div><div class="v num">' + fmtHoras(calc.horasNormales) + '</div></div>' +
-          '<div class="item"><div class="k">Horas extra</div><div class="v num">' + fmtHoras(calc.horasExtra) + '</div></div>' +
-          '<div class="item"><div class="k">Pago normal</div><div class="v num">' + fmtCLP(calc.pagoNormal) + '</div></div>' +
-          '<div class="item"><div class="k">Pago extra</div><div class="v num">' + fmtCLP(calc.pagoExtra) + '</div></div>' +
-        '</div>' +
-        '<div class="total-row"><span class="k">Total semana</span><span class="v num">' + fmtCLP(calc.total) + '</span></div>';
+        breakdownBlock +
+        '<div class="total-row"><span class="k">Total semana</span><span class="v num">' + fmtCLP(calc.total) + '</span></div>' +
+        '<div class="paid-row">' +
+          '<input type="checkbox" id="' + paidId + '"' + (isPaid ? " checked" : "") + '>' +
+          '<label for="' + paidId + '">Semana pagada</label>' +
+        '</div>';
 
       els.cards.appendChild(card);
 
@@ -674,6 +786,19 @@
         var val = Number(ev.target.value) || 0;
         salaries[entry.nombre] = val;
         saveSalaries(salaries);
+        renderCards(entries);
+      });
+
+      card.querySelector("#" + CSS.escape(modeId)).addEventListener("change", function(ev){
+        modos[entry.nombre] = ev.target.value;
+        saveModos(modos);
+        renderCards(entries);
+      });
+
+      card.querySelector("#" + CSS.escape(paidId)).addEventListener("change", function(ev){
+        if(ev.target.checked) pagadas[paidKey] = true;
+        else delete pagadas[paidKey];
+        savePagadas(pagadas);
         renderCards(entries);
       });
     });
