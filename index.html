@@ -616,6 +616,12 @@
     var m = totalMin % 60;
     return h + "h " + m + "m";
   }
+  function formatMiles(digitsStr){
+    return digitsStr.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  }
+  function parseMiles(str){
+    return Number(String(str || "").replace(/\D/g, "")) || 0;
+  }
   function fmtHorasDecimal(n){
     return (n || 0).toLocaleString("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " h";
   }
@@ -933,7 +939,7 @@
         '</div>' +
         '<div class="salary-row">' +
           '<label for="' + salaryId + '">Sueldo mensual</label>' +
-          '<div class="input-wrap"><span>$</span><input id="' + salaryId + '" type="number" inputmode="numeric" step="1000" value="' + (calc.sueldoMensual || "") + '" placeholder="0"></div>' +
+          '<div class="input-wrap"><span>$</span><input id="' + salaryId + '" type="text" inputmode="numeric" autocomplete="off" value="' + (calc.sueldoMensual ? formatMiles(String(calc.sueldoMensual)) : "") + '" placeholder="0"></div>' +
         '</div>' +
         (calc.sueldoMensual > 0 ? '' : '<p class="empty-hint">Ingresa el sueldo mensual para calcular el pago.</p>') +
         breakdownBlock +
@@ -945,8 +951,21 @@
 
       els.cards.appendChild(card);
 
-      card.querySelector("#" + CSS.escape(salaryId)).addEventListener("change", function(ev){
-        var val = Number(ev.target.value) || 0;
+      var salaryInput = card.querySelector("#" + CSS.escape(salaryId));
+      salaryInput.addEventListener("input", function(ev){
+        var pos = ev.target.selectionStart;
+        var digitsBefore = ev.target.value.slice(0, pos).replace(/\D/g, "").length;
+        var formatted = formatMiles(ev.target.value.replace(/\D/g, ""));
+        ev.target.value = formatted;
+        var newPos = 0, seen = 0;
+        while(newPos < formatted.length && seen < digitsBefore){
+          if(/\d/.test(formatted[newPos])) seen++;
+          newPos++;
+        }
+        ev.target.setSelectionRange(newPos, newPos);
+      });
+      salaryInput.addEventListener("change", function(ev){
+        var val = parseMiles(ev.target.value);
         salaries[entry.nombre] = val;
         saveSalaries(salaries);
         renderCards(entries);
