@@ -166,6 +166,34 @@
     white-space: nowrap;
   }
 
+  .week-grid{
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 4px;
+    margin-bottom: 12px;
+  }
+  .week-grid .day{
+    text-align: center;
+    background: var(--surface-2);
+    border-radius: 8px;
+    padding: 6px 2px;
+  }
+  .week-grid .day .d{
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    color: var(--ink-muted);
+  }
+  .week-grid .day .h{
+    font-size: 12px;
+    font-weight: 600;
+    margin-top: 2px;
+    font-family: "IBM Plex Mono", monospace;
+  }
+  .week-grid .day.empty .h{ color: var(--ink-muted); font-weight: 400; }
+  .week-grid .day.today{ background: var(--accent-soft); }
+  .week-grid .day.today .h{ color: var(--accent-ink); }
+
   .bar{
     height: 8px;
     border-radius: 999px;
@@ -373,6 +401,8 @@
   function fmtCLP(n){ return CLP.format(Math.round(n || 0)); }
   function fmtHoras(n){ return (Math.round((n||0) * 10) / 10).toLocaleString("es-CL") + " h"; }
 
+  var DAY_LETTERS = ["L", "M", "M", "J", "V", "S", "D"];
+
   function currentWeekRangeChile(){
     var now = new Date();
     var chileNow = new Date(now.toLocaleString("en-US", { timeZone: "America/Santiago" }));
@@ -384,14 +414,30 @@
     sunday.setDate(monday.getDate() + 6);
     function fmt(d){ return d.toISOString().slice(0,10); }
     function fmtLong(d){ return d.toLocaleDateString("es-CL", { day: "numeric", month: "short" }); }
-    return { from: fmt(monday), to: fmt(sunday), label: fmtLong(monday) + " – " + fmtLong(sunday) };
+    var days = [];
+    for(var i = 0; i < 7; i++){
+      var d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      days.push({ iso: fmt(d), label: DAY_LETTERS[i] });
+    }
+    return { from: fmt(monday), to: fmt(sunday), label: fmtLong(monday) + " – " + fmtLong(sunday), days: days, today: fmt(chileNow) };
   }
 
-  var EXAMPLE_DATA = [
-    { nombre: "Camila Rojas", horasTrabajadas: 44.5 },
-    { nombre: "Diego Fuentes", horasTrabajadas: 42 },
-    { nombre: "Valentina Soto", horasTrabajadas: 39.25 }
-  ];
+  var DEFAULT_SALARIES = { "Marlene Salazar": 553553 };
+
+  function buildExampleData(days){
+    var iso = function(i){ return days[i].iso; };
+    function porDia(hoursByIndex){
+      var out = {};
+      hoursByIndex.forEach(function(h, i){ if(h) out[iso(i)] = h; });
+      return out;
+    }
+    return [
+      { nombre: "Camila Rojas", horasTrabajadas: 44.5, porDia: porDia([8, 7.5, 8, 8, 8, 5, 0]) },
+      { nombre: "Diego Fuentes", horasTrabajadas: 42, porDia: porDia([6, 6, 6, 6, 6, 6, 6]) },
+      { nombre: "Valentina Soto", horasTrabajadas: 39.25, porDia: porDia([7, 7, 7, 6.25, 7, 5, 0]) }
+    ];
+  }
 
   var els = {
     weekRange: document.getElementById("weekRange"),
@@ -411,7 +457,11 @@
 
   var config = loadConfig();
   var salaries = loadSalaries();
+  for(var defaultName in DEFAULT_SALARIES){
+    if(!(defaultName in salaries)) salaries[defaultName] = DEFAULT_SALARIES[defaultName];
+  }
   var week = currentWeekRangeChile();
+  var EXAMPLE_DATA = buildExampleData(week.days);
   els.weekRange.textContent = "Semana " + week.label;
 
   els.cfgWorkerUrl.value = config.workerUrl || "";
@@ -435,6 +485,16 @@
     var pagoExtra = horasExtra * extraRate;
     var total = pagoNormal + pagoExtra;
     return { horas: horas, horasNormales: horasNormales, horasExtra: horasExtra, sueldoMensual: sueldoMensual, valorHora: valorHora, pagoNormal: pagoNormal, pagoExtra: pagoExtra, total: total };
+  }
+
+  function renderWeekGrid(porDia){
+    porDia = porDia || {};
+    return '<div class="week-grid">' + week.days.map(function(d){
+      var h = porDia[d.iso];
+      var cls = "day" + (d.iso === week.today ? " today" : "") + (h ? "" : " empty");
+      var val = h ? (Math.round(h * 10) / 10).toLocaleString("es-CL") : "–";
+      return '<div class="' + cls + '"><div class="d">' + d.label + '</div><div class="h num">' + val + '</div></div>';
+    }).join("") + '</div>';
   }
 
   function renderCards(entries){
@@ -467,6 +527,7 @@
           '<h2>' + escapeHtml(entry.nombre) + '</h2>' +
           '<span class="hours-pill num">' + fmtHoras(calc.horas) + '</span>' +
         '</div>' +
+        renderWeekGrid(entry.porDia) +
         '<div class="bar" aria-hidden="true">' +
           '<div class="seg-normal" style="width:' + pctNormal + '%"></div>' +
           '<div class="seg-extra" style="width:' + pctExtra + '%"></div>' +
