@@ -146,6 +146,7 @@ function computeWorkedHours(entries, rangeToISOEnd) {
     let pendingIn = null; // { time, belongsToDate }
     let total = 0;
     const porDia = new Map();
+    const eventosPorDia = new Map(); // fecha -> [{ tipo, hora }] (todos los marcajes crudos del dia)
 
     const addTramo = (fromEntry, toTime) => {
       const hrs = (new Date(toTime) - new Date(fromEntry.time)) / 3600000;
@@ -155,6 +156,10 @@ function computeWorkedHours(entries, rangeToISOEnd) {
     };
 
     for (const e of list) {
+      const dia = e.belongsToDate || e.time.slice(0, 10);
+      if (!eventosPorDia.has(dia)) eventosPorDia.set(dia, []);
+      eventosPorDia.get(dia).push({ tipo: e.type, hora: e.time });
+
       if (e.type === "In") {
         if (pendingIn) {
           // Doble "In" sin cierre intermedio: no se descarta el tramo
@@ -173,7 +178,7 @@ function computeWorkedHours(entries, rangeToISOEnd) {
       addTramo(pendingIn, rangeEnd);
     }
 
-    totals.set(personId, { total, porDia });
+    totals.set(personId, { total, porDia, eventosPorDia });
   }
 
   return totals;
@@ -213,13 +218,14 @@ async function handleHorasSemana(url, env) {
     .filter(Boolean);
 
   const result = [];
-  for (const [personId, { total, porDia }] of totals) {
+  for (const [personId, { total, porDia, eventosPorDia }] of totals) {
     const nombre = peopleMap.get(personId) || personId;
     if (allowedNames.length && !allowedNames.includes(nombre)) continue;
     result.push({
       nombre,
       horasTrabajadas: Math.round(total * 100) / 100,
       porDia: roundPorDia(porDia),
+      marcajesPorDia: eventosPorDiaToObj(eventosPorDia),
     });
   }
 
@@ -229,6 +235,12 @@ async function handleHorasSemana(url, env) {
 function roundPorDia(porDiaMap) {
   const out = {};
   for (const [fecha, horas] of porDiaMap) out[fecha] = Math.round(horas * 100) / 100;
+  return out;
+}
+
+function eventosPorDiaToObj(eventosPorDiaMap) {
+  const out = {};
+  for (const [fecha, eventos] of eventosPorDiaMap) out[fecha] = eventos;
   return out;
 }
 
