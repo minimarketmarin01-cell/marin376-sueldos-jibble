@@ -88,7 +88,26 @@
     margin: 0;
     text-wrap: balance;
   }
-  .week-range{ font-size: 13px; color: var(--ink-muted); margin-top: 2px; }
+  .week-range{
+    display: flex; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--ink-muted); margin-top: 2px;
+  }
+  .week-range .label{ min-width: 0; }
+  button.week-nav-btn{
+    border: none;
+    background: transparent;
+    color: var(--ink-muted);
+    width: 22px; height: 22px;
+    border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    flex: none;
+    font-size: 16px;
+    line-height: 1;
+  }
+  button.week-nav-btn:hover{ background: var(--surface-2); color: var(--ink); }
+  button.week-nav-btn:disabled{ opacity: .35; cursor: default; }
+  button.week-nav-btn:disabled:hover{ background: transparent; }
 
   button.icon-btn{
     border: 1px solid var(--border);
@@ -123,6 +142,32 @@
   .banner strong{ color: inherit; }
   .banner a, .banner button.link{
     color: inherit; text-decoration: underline; background:none; border:none; padding:0; font: inherit; cursor:pointer;
+  }
+
+  .install-banner{
+    display: flex; align-items: center; gap: 10px;
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-size: 13px;
+    margin-bottom: 14px;
+  }
+  .install-banner p{ margin: 0; flex: 1; line-height: 1.4; }
+  .install-banner button.install-btn{
+    background: var(--accent);
+    color: var(--surface);
+    border: none;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    flex: none;
+  }
+  .install-banner button.dismiss-btn{
+    background: none; border: none; color: inherit; opacity: .6;
+    font-size: 18px; line-height: 1; cursor: pointer; flex: none; padding: 0 2px;
   }
 
   .summary{
@@ -321,7 +366,11 @@
   <div class="brand">
     <div class="eyebrow">Minimarket Marín 376</div>
     <h1>Planilla semanal</h1>
-    <div class="week-range" id="weekRange">Cargando semana…</div>
+    <div class="week-range">
+      <button class="week-nav-btn" id="prevWeekBtn" aria-label="Semana anterior">‹</button>
+      <span class="label" id="weekRange">Cargando semana…</span>
+      <button class="week-nav-btn" id="nextWeekBtn" aria-label="Semana siguiente">›</button>
+    </div>
   </div>
   <div class="icon-row">
     <button class="icon-btn" id="refreshBtn" aria-label="Actualizar horas" title="Actualizar">
@@ -330,6 +379,7 @@
   </div>
 </header>
 
+<div id="installBanner"></div>
 <div id="banner"></div>
 
 <section class="summary" id="summary" hidden>
@@ -366,6 +416,11 @@
       <input id="cfgWeeklyCap" type="number" inputmode="numeric" step="1">
     </div>
     <button class="save-btn" id="saveSettingsBtn">Guardar y actualizar</button>
+    <div class="field">
+      <label for="jumpDate">Ir a una semana anterior</label>
+      <input id="jumpDate" type="date">
+      <span class="hint">Elige cualquier fecha (por ejemplo de julio) para ver la semana que la contiene.</span>
+    </div>
     <span class="hint">Los sueldos mensuales de cada trabajador se guardan directamente en su tarjeta, en este navegador.</span>
   </div>
 </details>
@@ -403,24 +458,50 @@
 
   var DAY_LETTERS = ["L", "M", "M", "J", "V", "S", "D"];
 
-  function currentWeekRangeChile(){
-    var now = new Date();
-    var chileNow = new Date(now.toLocaleString("en-US", { timeZone: "America/Santiago" }));
-    var day = chileNow.getDay();
+  // Convención: todo Date usado para semanas/días guarda el día calendario
+  // deseado en sus campos UTC (getUTCDate/setUTCDate/toISOString), sin
+  // importar la zona horaria real del teléfono — así no se corre un día
+  // cuando el navegador está en UTC-3/-4 y la fecha cae cerca de medianoche.
+  function fmtISO(d){ return d.toISOString().slice(0, 10); }
+  function fmtLong(d){ return d.toLocaleDateString("es-CL", { day: "numeric", month: "short", timeZone: "UTC" }); }
+
+  function chileNowDate(){
+    var parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Santiago",
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
+    }).formatToParts(new Date());
+    var get = function(type){ return Number(parts.find(function(p){ return p.type === type; }).value); };
+    var hour = get("hour");
+    return new Date(Date.UTC(get("year"), get("month") - 1, get("day"), hour === 24 ? 0 : hour, get("minute"), get("second")));
+  }
+
+  function mondayOf(date){
+    var day = date.getUTCDay();
     var diffToMonday = day === 0 ? -6 : 1 - day;
-    var monday = new Date(chileNow);
-    monday.setDate(chileNow.getDate() + diffToMonday);
+    var monday = new Date(date);
+    monday.setUTCDate(date.getUTCDate() + diffToMonday);
+    monday.setUTCHours(0, 0, 0, 0);
+    return monday;
+  }
+
+  // Convierte "YYYY-MM-DD" (de <input type=date>) a un Date cuyos campos
+  // UTC son esa fecha calendario, para que fmtISO() la lea de vuelta igual.
+  function dateFromISO(iso){
+    var parts = iso.split("-").map(Number);
+    return new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
+  }
+
+  function computeWeek(monday){
     var sunday = new Date(monday);
-    sunday.setDate(monday.getDate() + 6);
-    function fmt(d){ return d.toISOString().slice(0,10); }
-    function fmtLong(d){ return d.toLocaleDateString("es-CL", { day: "numeric", month: "short" }); }
+    sunday.setUTCDate(monday.getUTCDate() + 6);
     var days = [];
     for(var i = 0; i < 7; i++){
       var d = new Date(monday);
-      d.setDate(monday.getDate() + i);
-      days.push({ iso: fmt(d), label: DAY_LETTERS[i] });
+      d.setUTCDate(monday.getUTCDate() + i);
+      days.push({ iso: fmtISO(d), label: DAY_LETTERS[i] });
     }
-    return { from: fmt(monday), to: fmt(sunday), label: fmtLong(monday) + " – " + fmtLong(sunday), days: days, today: fmt(chileNow) };
+    return { from: fmtISO(monday), to: fmtISO(sunday), label: fmtLong(monday) + " – " + fmtLong(sunday), days: days };
   }
 
   var DEFAULT_SALARIES = { "Marlene Salazar": 553553 };
@@ -441,7 +522,10 @@
 
   var els = {
     weekRange: document.getElementById("weekRange"),
+    prevWeekBtn: document.getElementById("prevWeekBtn"),
+    nextWeekBtn: document.getElementById("nextWeekBtn"),
     banner: document.getElementById("banner"),
+    installBanner: document.getElementById("installBanner"),
     summary: document.getElementById("summary"),
     sumHoras: document.getElementById("sumHoras"),
     sumTotal: document.getElementById("sumTotal"),
@@ -452,7 +536,8 @@
     cfgExtraRate: document.getElementById("cfgExtraRate"),
     cfgWeeklyCap: document.getElementById("cfgWeeklyCap"),
     saveSettingsBtn: document.getElementById("saveSettingsBtn"),
-    settingsPanel: document.getElementById("settingsPanel")
+    settingsPanel: document.getElementById("settingsPanel"),
+    jumpDate: document.getElementById("jumpDate")
   };
 
   var config = loadConfig();
@@ -460,9 +545,43 @@
   for(var defaultName in DEFAULT_SALARIES){
     if(!(defaultName in salaries)) salaries[defaultName] = DEFAULT_SALARIES[defaultName];
   }
-  var week = currentWeekRangeChile();
+
+  var todayIso = fmtISO(chileNowDate());
+  var currentWeekMonday = mondayOf(chileNowDate());
+  var weekMonday = new Date(currentWeekMonday);
+  var week = computeWeek(weekMonday);
   var EXAMPLE_DATA = buildExampleData(week.days);
-  els.weekRange.textContent = "Semana " + week.label;
+
+  function renderWeekLabel(){
+    els.weekRange.textContent = week.label;
+    els.nextWeekBtn.disabled = fmtISO(weekMonday) >= fmtISO(currentWeekMonday);
+  }
+  renderWeekLabel();
+
+  function goToWeek(monday){
+    weekMonday = monday;
+    week = computeWeek(weekMonday);
+    EXAMPLE_DATA = buildExampleData(week.days);
+    renderWeekLabel();
+    load();
+  }
+
+  els.prevWeekBtn.addEventListener("click", function(){
+    var m = new Date(weekMonday);
+    m.setUTCDate(m.getUTCDate() - 7);
+    goToWeek(m);
+  });
+  els.nextWeekBtn.addEventListener("click", function(){
+    if(els.nextWeekBtn.disabled) return;
+    var m = new Date(weekMonday);
+    m.setUTCDate(m.getUTCDate() + 7);
+    goToWeek(m);
+  });
+  els.jumpDate.addEventListener("change", function(){
+    if(!els.jumpDate.value) return;
+    goToWeek(mondayOf(dateFromISO(els.jumpDate.value)));
+    els.settingsPanel.open = false;
+  });
 
   els.cfgWorkerUrl.value = config.workerUrl || "";
   els.cfgExtraRate.value = config.extraRate;
@@ -491,7 +610,7 @@
     porDia = porDia || {};
     return '<div class="week-grid">' + week.days.map(function(d){
       var h = porDia[d.iso];
-      var cls = "day" + (d.iso === week.today ? " today" : "") + (h ? "" : " empty");
+      var cls = "day" + (d.iso === todayIso ? " today" : "") + (h ? "" : " empty");
       var val = h ? (Math.round(h * 10) / 10).toLocaleString("es-CL") : "–";
       return '<div class="' + cls + '"><div class="d">' + d.label + '</div><div class="h num">' + val + '</div></div>';
     }).join("") + '</div>';
@@ -629,6 +748,62 @@
     els.settingsPanel.open = false;
     load();
   });
+
+  var INSTALL_DISMISS_KEY = "planilla.installDismissed";
+  var deferredInstallPrompt = null;
+
+  function hideInstallBanner(){ els.installBanner.innerHTML = ""; }
+  function installDismissed(){
+    try{ return localStorage.getItem(INSTALL_DISMISS_KEY) === "1"; }catch(e){ return false; }
+  }
+  function dismissInstallBanner(){
+    try{ localStorage.setItem(INSTALL_DISMISS_KEY, "1"); }catch(e){}
+    hideInstallBanner();
+  }
+  function showInstallBanner(bodyHtml){
+    els.installBanner.innerHTML = '<div class="install-banner">' + bodyHtml + '</div>';
+  }
+
+  window.addEventListener("beforeinstallprompt", function(e){
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    if(installDismissed()) return;
+    showInstallBanner(
+      '<p>Instala esta app en el celular para abrirla directo, sin buscarla en el navegador.</p>' +
+      '<button class="install-btn" id="installBtn">Instalar</button>' +
+      '<button class="dismiss-btn" id="installDismissBtn" aria-label="Cerrar aviso">&times;</button>'
+    );
+    document.getElementById("installBtn").addEventListener("click", function(){
+      deferredInstallPrompt.prompt();
+      deferredInstallPrompt.userChoice.finally(function(){
+        deferredInstallPrompt = null;
+        hideInstallBanner();
+      });
+    });
+    document.getElementById("installDismissBtn").addEventListener("click", dismissInstallBanner);
+  });
+
+  window.addEventListener("appinstalled", function(){
+    deferredInstallPrompt = null;
+    hideInstallBanner();
+  });
+
+  // iOS Safari no dispara beforeinstallprompt: mostrar instrucciones manuales.
+  (function(){
+    var isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+    var isStandalone = window.navigator.standalone === true ||
+      (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+    if(!isIos || isStandalone || installDismissed()) return;
+    showInstallBanner(
+      '<p>Para instalar: toca <strong>Compartir</strong> y luego <strong>"Agregar a pantalla de inicio"</strong>.</p>' +
+      '<button class="dismiss-btn" id="installDismissBtnIos" aria-label="Cerrar aviso">&times;</button>'
+    );
+    document.getElementById("installDismissBtnIos").addEventListener("click", dismissInstallBanner);
+  })();
+
+  if("serviceWorker" in navigator){
+    navigator.serviceWorker.register("sw.js").catch(function(){});
+  }
 
   load();
 })();
