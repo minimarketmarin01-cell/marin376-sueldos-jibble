@@ -122,15 +122,15 @@ async function fetchTimeEntries(token, from, to) {
   return fetchAllPages(url, token);
 }
 
-// Empareja cada "In" con su siguiente "Out" por persona y suma la duración.
-// Los marcajes con breakId (entrada/salida de un descanso) se excluyen del
-// cálculo de horas trabajadas. Si queda un "In" sin cerrar (turno en curso),
+// Empareja cada "In" con el siguiente cierre de tramo por persona y suma la
+// duración. En datos reales, "StartBreak" cierra el tramo trabajado (no el
+// campo breakId, que viene en null); para retomar, Jibble reusa el tipo
+// "In" en vez de "EndBreak". Si queda un "In" sin cerrar (turno en curso),
 // se cuentan las horas hasta ahora (o hasta el fin del rango consultado).
 function computeWorkedHours(entries, rangeToISOEnd) {
   const byPerson = new Map();
   for (const e of entries) {
     if (!e.personId || !e.time || !e.type) continue;
-    if (e.breakId) continue;
     if (!byPerson.has(e.personId)) byPerson.set(e.personId, []);
     byPerson.get(e.personId).push(e);
   }
@@ -146,11 +146,17 @@ function computeWorkedHours(entries, rangeToISOEnd) {
 
     for (const e of list) {
       if (e.type === "In") {
-        pendingIn = e.time; // si había un "In" previo sin cerrar, se descarta (dato inconsistente)
-      } else if (e.type === "Out" && pendingIn) {
+        if (pendingIn) {
+          // Doble "In" sin cierre intermedio: no se descarta el tramo
+          // anterior, se cierra en este mismo instante.
+          total += (new Date(e.time) - new Date(pendingIn)) / 3600000;
+        }
+        pendingIn = e.time;
+      } else if ((e.type === "Out" || e.type === "StartBreak") && pendingIn) {
         total += (new Date(e.time) - new Date(pendingIn)) / 3600000;
         pendingIn = null;
       }
+      // Otros tipos (p.ej. EndBreak) no abren ni cierran tramo.
     }
 
     if (pendingIn) {
