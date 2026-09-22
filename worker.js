@@ -123,10 +123,12 @@ async function fetchTimeEntries(token, from, to) {
 }
 
 // Empareja cada "In" con el siguiente cierre de tramo por persona y suma la
-// duración. En datos reales, "StartBreak" cierra el tramo trabajado (no el
-// campo breakId, que viene en null); para retomar, Jibble reusa el tipo
-// "In" en vez de "EndBreak". Si queda un "In" sin cerrar (turno en curso),
-// se cuentan las horas hasta ahora (o hasta el fin del rango consultado).
+// duración, tanto el total semanal como el desglose por día (belongsToDate
+// del "In" que abrió el tramo). En datos reales, "StartBreak" cierra el
+// tramo trabajado (no el campo breakId, que viene en null); para retomar,
+// Jibble reusa el tipo "In" en vez de "EndBreak". Si queda un "In" sin
+// cerrar (turno en curso), se cuentan las horas hasta ahora (o hasta el
+// fin del rango consultado).
 function computeWorkedHours(entries, rangeToISOEnd) {
   const byPerson = new Map();
   for (const e of entries) {
@@ -135,36 +137,43 @@ function computeWorkedHours(entries, rangeToISOEnd) {
     byPerson.get(e.personId).push(e);
   }
 
-  const totals = new Map();
+  const totals = new Map(); // personId -> { total, porDia: Map(fecha -> horas) }
   const now = Date.now();
   const rangeEnd = Math.min(now, new Date(rangeToISOEnd).getTime());
 
   for (const [personId, list] of byPerson) {
     list.sort((a, b) => new Date(a.time) - new Date(b.time));
-    let pendingIn = null;
+    let pendingIn = null; // { time, belongsToDate }
     let total = 0;
+    const porDia = new Map();
+
+    const addTramo = (fromEntry, toTime) => {
+      const hrs = (new Date(toTime) - new Date(fromEntry.time)) / 3600000;
+      total += hrs;
+      const dia = fromEntry.belongsToDate || fromEntry.time.slice(0, 10);
+      porDia.set(dia, (porDia.get(dia) || 0) + hrs);
+    };
 
     for (const e of list) {
       if (e.type === "In") {
         if (pendingIn) {
           // Doble "In" sin cierre intermedio: no se descarta el tramo
           // anterior, se cierra en este mismo instante.
-          total += (new Date(e.time) - new Date(pendingIn)) / 3600000;
+          addTramo(pendingIn, e.time);
         }
-        pendingIn = e.time;
+        pendingIn = { time: e.time, belongsToDate: e.belongsToDate };
       } else if ((e.type === "Out" || e.type === "StartBreak") && pendingIn) {
-        total += (new Date(e.time) - new Date(pendingIn)) / 3600000;
+        addTramo(pendingIn, e.time);
         pendingIn = null;
       }
       // Otros tipos (p.ej. EndBreak) no abren ni cierran tramo.
     }
 
-    if (pendingIn) {
-      const start = new Date(pendingIn).getTime();
-      if (rangeEnd > start) total += (rangeEnd - start) / 3600000;
+    if (pendingIn && rangeEnd > new Date(pendingIn.time).getTime()) {
+      addTramo(pendingIn, rangeEnd);
     }
 
-    totals.set(personId, total);
+    totals.set(personId, { total, porDia });
   }
 
   return totals;
@@ -204,13 +213,23 @@ async function handleHorasSemana(url, env) {
     .filter(Boolean);
 
   const result = [];
-  for (const [personId, horas] of totals) {
+  for (const [personId, { total, porDia }] of totals) {
     const nombre = peopleMap.get(personId) || personId;
     if (allowedNames.length && !allowedNames.includes(nombre)) continue;
-    result.push({ nombre, horasTrabajadas: Math.round(horas * 100) / 100 });
+    result.push({
+      nombre,
+      horasTrabajadas: Math.round(total * 100) / 100,
+      porDia: roundPorDia(porDia),
+    });
   }
 
   return { from, to, empleados: result };
+}
+
+function roundPorDia(porDiaMap) {
+  const out = {};
+  for (const [fecha, horas] of porDiaMap) out[fecha] = Math.round(horas * 100) / 100;
+  return out;
 }
 
 export default {
@@ -239,10 +258,11 @@ export default {
           fetchTimeEntries(token, from, to),
         ]);
         const totals = computeWorkedHours(entries, `${to}T23:59:59Z`);
-        const empleados = [...totals].map(([personId, horas]) => ({
+        const empleados = [...totals].map(([personId, { total, porDia }]) => ({
           personId,
           nombre: peopleMap.get(personId) || personId,
-          horasTrabajadas: Math.round(horas * 100) / 100,
+          horasTrabajadas: Math.round(total * 100) / 100,
+          porDia: roundPorDia(porDia),
         }));
         return json({ from, to, empleados, cantidadDeMarcajes: entries.length, marcajesCrudos: entries.slice(0, 20) });
       }
