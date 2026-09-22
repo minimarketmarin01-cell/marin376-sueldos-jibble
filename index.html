@@ -688,8 +688,8 @@
         var endH = Math.floor(endMin / 60) % 24;
         var endM = endMin % 60;
         out[iso(i)] = [
-          { tipo: "In", hora: iso(i) + "T09:00:00Z" },
-          { tipo: "Out", hora: iso(i) + "T" + String(endH).padStart(2, "0") + ":" + String(endM).padStart(2, "0") + ":00Z" }
+          { tipo: "In", hora: iso(i) + "T09:00:00Z", duracionHoras: h },
+          { tipo: "Out", hora: iso(i) + "T" + String(endH).padStart(2, "0") + ":" + String(endM).padStart(2, "0") + ":00Z", duracionHoras: null }
         ];
       });
       return out;
@@ -840,10 +840,9 @@
     if(!eventos || !eventos.length){
       els.dayModalBody.innerHTML = '<p class="empty-hint" style="margin:0;">Sin marcajes ese día.</p>';
     }else{
-      els.dayModalBody.innerHTML = '<div class="marcaje-list">' + eventos.map(function(ev, i){
+      els.dayModalBody.innerHTML = '<div class="marcaje-list">' + eventos.map(function(ev){
         var info = TIPO_MARCAJE[ev.tipo] || { label: ev.tipo, cls: "otro" };
-        var siguiente = eventos[i + 1];
-        var duracion = siguiente ? fmtHoras((new Date(siguiente.hora) - new Date(ev.hora)) / 3600000) : "–";
+        var duracion = (ev.duracionHoras != null) ? fmtHoras(ev.duracionHoras) : "–";
         return '<div class="marcaje-row">' +
           '<span class="tipo-dot ' + info.cls + '"></span>' +
           '<span class="tipo-label">' + escapeHtml(info.label) + '</span>' +

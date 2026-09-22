@@ -192,10 +192,11 @@ function computeWorkedHours(entries, rangeToISOEnd) {
 
   for (const [personId, list] of byPerson) {
     list.sort((a, b) => new Date(a.time) - new Date(b.time));
-    let pendingIn = null; // { time, belongsToDate }
+    let pendingIn = null; // { time, belongsToDate, eventoRef }
+    let pendingBreak = null; // { time, belongsToDate, eventoRef }
     let total = 0;
     const porDia = new Map();
-    const eventosPorDia = new Map(); // fecha -> [{ tipo, hora }] (todos los marcajes crudos del dia)
+    const eventosPorDia = new Map(); // fecha -> [{ tipo, hora, duracionHoras }] (marcajes crudos del dia)
 
     const addTramo = (fromEntry, toTime) => {
       total += (new Date(toTime) - new Date(fromEntry.time)) / 3600000;
@@ -204,27 +205,56 @@ function computeWorkedHours(entries, rangeToISOEnd) {
       }
     };
 
+    // Duracion de un marcaje hasta que cierra (fromTime -> toTime), recortada
+    // a medianoche local si el cierre cae en otro dia calendario. Se guarda
+    // en el propio evento para mostrarla en el detalle por dia (como Jibble).
+    const setDuracion = (eventoRef, fromTime, toTime) => {
+      let effectiveEnd = new Date(toTime).getTime();
+      if (chileLocalDate(fromTime) !== chileLocalDate(effectiveEnd)) {
+        effectiveEnd = findDayBoundary(fromTime, toTime);
+      }
+      const hrs = (effectiveEnd - new Date(fromTime).getTime()) / 3600000;
+      eventoRef.duracionHoras = hrs > 0 ? Math.round(hrs * 100) / 100 : 0;
+    };
+
     for (const e of list) {
       const dia = e.belongsToDate || e.time.slice(0, 10);
       if (!eventosPorDia.has(dia)) eventosPorDia.set(dia, []);
-      eventosPorDia.get(dia).push({ tipo: e.type, hora: e.time });
+      const eventoRef = { tipo: e.type, hora: e.time, duracionHoras: null };
+      eventosPorDia.get(dia).push(eventoRef);
 
       if (e.type === "In") {
         if (pendingIn) {
           // Doble "In" sin cierre intermedio: no se descarta el tramo
           // anterior, se cierra en este mismo instante.
           addTramo(pendingIn, e.time);
+          setDuracion(pendingIn.eventoRef, pendingIn.time, e.time);
         }
-        pendingIn = { time: e.time, belongsToDate: e.belongsToDate };
-      } else if ((e.type === "Out" || e.type === "StartBreak") && pendingIn) {
+        if (pendingBreak) {
+          // El descanso termina al retomar el trabajo.
+          setDuracion(pendingBreak.eventoRef, pendingBreak.time, e.time);
+          pendingBreak = null;
+        }
+        pendingIn = { time: e.time, belongsToDate: e.belongsToDate, eventoRef };
+      } else if (e.type === "Out" && pendingIn) {
         addTramo(pendingIn, e.time);
+        setDuracion(pendingIn.eventoRef, pendingIn.time, e.time);
         pendingIn = null;
+      } else if (e.type === "StartBreak" && pendingIn) {
+        addTramo(pendingIn, e.time);
+        setDuracion(pendingIn.eventoRef, pendingIn.time, e.time);
+        pendingIn = null;
+        pendingBreak = { time: e.time, belongsToDate: e.belongsToDate, eventoRef };
       }
       // Otros tipos (p.ej. EndBreak) no abren ni cierran tramo.
     }
 
     if (pendingIn && rangeEnd > new Date(pendingIn.time).getTime()) {
       addTramo(pendingIn, rangeEnd);
+      setDuracion(pendingIn.eventoRef, pendingIn.time, rangeEnd);
+    }
+    if (pendingBreak && rangeEnd > new Date(pendingBreak.time).getTime()) {
+      setDuracion(pendingBreak.eventoRef, pendingBreak.time, rangeEnd);
     }
 
     totals.set(personId, { total, porDia, eventosPorDia });
