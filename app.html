@@ -1,0 +1,574 @@
+<title>Planilla Semanal</title>
+<style>
+  :root{
+    --bg:#F6F8F6;
+    --surface:#FFFFFF;
+    --surface-2:#EEF2EF;
+    --ink:#16211C;
+    --ink-muted:#5B6960;
+    --border:#DDE4DF;
+    --accent:#0F6B4C;
+    --accent-soft:#E4F1EA;
+    --accent-ink:#0B4E38;
+    --warn:#B5570A;
+    --warn-soft:#FBEADD;
+    --danger:#B3261E;
+    --danger-soft:#FBE9E7;
+    --shadow: 0 1px 2px rgba(22,33,28,0.06), 0 4px 14px rgba(22,33,28,0.05);
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0D1310;
+      --surface:#161E1A;
+      --surface-2:#1C2620;
+      --ink:#EAF2EC;
+      --ink-muted:#9AAAA1;
+      --border:#253028;
+      --accent:#3FCB92;
+      --accent-soft:#16332A;
+      --accent-ink:#B7F0D4;
+      --warn:#F0975A;
+      --warn-soft:#3A2313;
+      --danger:#F2837B;
+      --danger-soft:#3A1917;
+      --shadow: 0 1px 2px rgba(0,0,0,0.35), 0 4px 16px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0D1310;
+    --surface:#161E1A;
+    --surface-2:#1C2620;
+    --ink:#EAF2EC;
+    --ink-muted:#9AAAA1;
+    --border:#253028;
+    --accent:#3FCB92;
+    --accent-soft:#16332A;
+    --accent-ink:#B7F0D4;
+    --warn:#F0975A;
+    --warn-soft:#3A2313;
+    --danger:#F2837B;
+    --danger-soft:#3A1917;
+    --shadow: 0 1px 2px rgba(0,0,0,0.35), 0 4px 16px rgba(0,0,0,0.35);
+  }
+
+  * { box-sizing: border-box; }
+  body{
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", -apple-system, "Segoe UI", sans-serif;
+    padding-inline: 16px;
+    padding-block: 16px;
+    max-width: 560px;
+    margin: 0 auto;
+  }
+  .num, .tabular { font-family: "IBM Plex Mono", ui-monospace, "SF Mono", monospace; font-variant-numeric: tabular-nums; }
+
+  header.top{
+    position: sticky;
+    top: env(safe-area-inset-top, 0px);
+    background: var(--bg);
+    padding-block: 6px 12px;
+    z-index: 5;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .brand{ display:flex; flex-direction:column; gap:2px; }
+  .brand .eyebrow{
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+  }
+  .brand h1{
+    font-family: "Archivo", "IBM Plex Sans", sans-serif;
+    font-weight: 700;
+    font-size: 22px;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .week-range{ font-size: 13px; color: var(--ink-muted); margin-top: 2px; }
+
+  button.icon-btn{
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink);
+    width: 38px; height: 38px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    flex: none;
+  }
+  button.icon-btn:focus-visible, button:focus-visible, input:focus-visible, summary:focus-visible{
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  button.icon-btn svg{ width: 18px; height: 18px; }
+  .icon-row{ display:flex; gap:8px; }
+  .spin{ animation: spin 0.9s linear infinite; }
+  @keyframes spin{ to{ transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce){ .spin{ animation: none; } }
+
+  .banner{
+    display:flex; gap:10px; align-items:flex-start;
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 13px;
+    line-height: 1.45;
+    margin-bottom: 14px;
+  }
+  .banner.example{ background: var(--warn-soft); color: var(--warn); }
+  .banner.error{ background: var(--danger-soft); color: var(--danger); }
+  .banner strong{ color: inherit; }
+  .banner a, .banner button.link{
+    color: inherit; text-decoration: underline; background:none; border:none; padding:0; font: inherit; cursor:pointer;
+  }
+
+  .summary{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .tile{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 12px 14px;
+    box-shadow: var(--shadow);
+  }
+  .tile .label{ font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--ink-muted); }
+  .tile .value{ font-size: 22px; font-weight: 600; margin-top: 4px; }
+  .tile.accent{ background: var(--accent-soft); border-color: transparent; }
+  .tile.accent .value{ color: var(--accent-ink); }
+
+  .cards{ display:flex; flex-direction:column; gap: 12px; }
+  .card{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px;
+    box-shadow: var(--shadow);
+  }
+  .card-head{
+    display:flex; justify-content:space-between; align-items: baseline; gap: 10px;
+    margin-bottom: 10px;
+  }
+  .card-head h2{
+    font-family: "Archivo", sans-serif;
+    font-size: 17px;
+    margin: 0;
+  }
+  .hours-pill{
+    font-size: 12px;
+    color: var(--ink-muted);
+    white-space: nowrap;
+  }
+
+  .bar{
+    height: 8px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    overflow: hidden;
+    display: flex;
+    margin-bottom: 10px;
+  }
+  .bar .seg-normal{ background: var(--accent); }
+  .bar .seg-extra{ background: var(--warn); }
+
+  .legend{
+    display:flex; gap: 14px; font-size: 12px; color: var(--ink-muted); margin-bottom: 14px;
+  }
+  .legend span{ display:flex; align-items:center; gap: 5px; }
+  .dot{ width: 8px; height: 8px; border-radius: 50%; flex:none; }
+  .dot.normal{ background: var(--accent); }
+  .dot.extra{ background: var(--warn); }
+
+  .salary-row{
+    display:flex; align-items:center; gap: 8px; margin-bottom: 12px;
+  }
+  .salary-row label{ font-size: 12px; color: var(--ink-muted); flex: none; }
+  .salary-row .input-wrap{
+    position: relative; flex: 1;
+  }
+  .salary-row .input-wrap span{
+    position:absolute; left: 10px; top: 50%; transform: translateY(-50%);
+    font-size: 13px; color: var(--ink-muted);
+  }
+  .salary-row input{
+    width: 100%;
+    padding: 8px 10px 8px 24px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 14px;
+    font-family: "IBM Plex Mono", monospace;
+  }
+
+  .breakdown{
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .breakdown .item{
+    background: var(--surface-2);
+    border-radius: 10px;
+    padding: 8px 10px;
+  }
+  .breakdown .item .k{ font-size: 11px; color: var(--ink-muted); }
+  .breakdown .item .v{ font-size: 15px; font-weight: 600; margin-top: 2px; }
+
+  .total-row{
+    display:flex; justify-content:space-between; align-items:baseline;
+    border-top: 1px dashed var(--border);
+    padding-top: 12px;
+  }
+  .total-row .k{ font-size: 13px; color: var(--ink-muted); }
+  .total-row .v{ font-size: 26px; font-weight: 700; color: var(--accent-ink); }
+
+  .empty-hint{
+    font-size: 12px; color: var(--ink-muted); margin-top: -2px; margin-bottom: 10px;
+  }
+
+  details.settings{
+    margin-top: 22px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+    overflow: hidden;
+  }
+  details.settings summary{
+    cursor: pointer;
+    padding: 13px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-muted);
+    list-style: none;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  details.settings summary::-webkit-details-marker{ display:none; }
+  details.settings summary::after{ content: "▾"; transition: transform .15s; }
+  details.settings[open] summary::after{ transform: rotate(180deg); }
+  .settings-body{ padding: 0 16px 16px; display:flex; flex-direction:column; gap:12px; }
+  .field{ display:flex; flex-direction:column; gap:4px; }
+  .field label{ font-size: 12px; color: var(--ink-muted); }
+  .field input{
+    padding: 9px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--ink);
+    font-size: 14px;
+  }
+  .field .hint{ font-size: 11px; color: var(--ink-muted); }
+  .save-btn{
+    background: var(--accent);
+    color: var(--surface);
+    border: none;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .skeleton{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 16px;
+    display:flex; flex-direction:column; gap:10px;
+  }
+  .skeleton .bar-sk{ height: 14px; border-radius: 6px; background: var(--surface-2); animation: pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse{ 0%,100%{ opacity:.6; } 50%{ opacity:1; } }
+  @media (prefers-reduced-motion: reduce){ .bar-sk{ animation: none; } }
+</style>
+
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
+
+<header class="top">
+  <div class="brand">
+    <div class="eyebrow">Minimarket Marín 376</div>
+    <h1>Planilla semanal</h1>
+    <div class="week-range" id="weekRange">Cargando semana…</div>
+  </div>
+  <div class="icon-row">
+    <button class="icon-btn" id="refreshBtn" aria-label="Actualizar horas" title="Actualizar">
+      <svg id="refreshIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+    </button>
+  </div>
+</header>
+
+<div id="banner"></div>
+
+<section class="summary" id="summary" hidden>
+  <div class="tile">
+    <div class="label">Horas totales equipo</div>
+    <div class="value num" id="sumHoras">—</div>
+  </div>
+  <div class="tile accent">
+    <div class="label">Total a pagar semana</div>
+    <div class="value num" id="sumTotal">—</div>
+  </div>
+</section>
+
+<main class="cards" id="cards">
+  <div class="skeleton"><div class="bar-sk" style="width:40%"></div><div class="bar-sk" style="width:90%"></div><div class="bar-sk" style="width:70%"></div></div>
+  <div class="skeleton"><div class="bar-sk" style="width:35%"></div><div class="bar-sk" style="width:85%"></div><div class="bar-sk" style="width:60%"></div></div>
+  <div class="skeleton"><div class="bar-sk" style="width:45%"></div><div class="bar-sk" style="width:80%"></div><div class="bar-sk" style="width:65%"></div></div>
+</main>
+
+<details class="settings" id="settingsPanel">
+  <summary>Configuración</summary>
+  <div class="settings-body">
+    <div class="field">
+      <label for="cfgWorkerUrl">URL del Worker (Cloudflare)</label>
+      <input id="cfgWorkerUrl" type="url" placeholder="https://marin376-jibble-horas.TU-SUBDOMINIO.workers.dev" autocomplete="off">
+      <span class="hint">Se pide a esta URL: /horas-semana?from=YYYY-MM-DD&amp;to=YYYY-MM-DD</span>
+    </div>
+    <div class="field">
+      <label for="cfgExtraRate">Valor hora extra (CLP)</label>
+      <input id="cfgExtraRate" type="number" inputmode="numeric" step="1">
+    </div>
+    <div class="field">
+      <label for="cfgWeeklyCap">Horas semanales normales (tope)</label>
+      <input id="cfgWeeklyCap" type="number" inputmode="numeric" step="1">
+    </div>
+    <button class="save-btn" id="saveSettingsBtn">Guardar y actualizar</button>
+    <span class="hint">Los sueldos mensuales de cada trabajador se guardan directamente en su tarjeta, en este navegador.</span>
+  </div>
+</details>
+
+<script>
+(function(){
+  "use strict";
+
+  var DEFAULTS = { workerUrl: "", extraRate: 4000, weeklyCap: 42 };
+
+  function loadConfig(){
+    try{
+      var raw = localStorage.getItem("planilla.config");
+      if(!raw) return Object.assign({}, DEFAULTS);
+      var parsed = JSON.parse(raw);
+      return Object.assign({}, DEFAULTS, parsed);
+    }catch(e){ return Object.assign({}, DEFAULTS); }
+  }
+  function saveConfig(cfg){
+    try{ localStorage.setItem("planilla.config", JSON.stringify(cfg)); }catch(e){}
+  }
+  function loadSalaries(){
+    try{
+      var raw = localStorage.getItem("planilla.sueldos");
+      return raw ? JSON.parse(raw) : {};
+    }catch(e){ return {}; }
+  }
+  function saveSalaries(map){
+    try{ localStorage.setItem("planilla.sueldos", JSON.stringify(map)); }catch(e){}
+  }
+
+  var CLP = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
+  function fmtCLP(n){ return CLP.format(Math.round(n || 0)); }
+  function fmtHoras(n){ return (Math.round((n||0) * 10) / 10).toLocaleString("es-CL") + " h"; }
+
+  function currentWeekRangeChile(){
+    var now = new Date();
+    var chileNow = new Date(now.toLocaleString("en-US", { timeZone: "America/Santiago" }));
+    var day = chileNow.getDay();
+    var diffToMonday = day === 0 ? -6 : 1 - day;
+    var monday = new Date(chileNow);
+    monday.setDate(chileNow.getDate() + diffToMonday);
+    var sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    function fmt(d){ return d.toISOString().slice(0,10); }
+    function fmtLong(d){ return d.toLocaleDateString("es-CL", { day: "numeric", month: "short" }); }
+    return { from: fmt(monday), to: fmt(sunday), label: fmtLong(monday) + " – " + fmtLong(sunday) };
+  }
+
+  var EXAMPLE_DATA = [
+    { nombre: "Camila Rojas", horasTrabajadas: 44.5 },
+    { nombre: "Diego Fuentes", horasTrabajadas: 42 },
+    { nombre: "Valentina Soto", horasTrabajadas: 39.25 }
+  ];
+
+  var els = {
+    weekRange: document.getElementById("weekRange"),
+    banner: document.getElementById("banner"),
+    summary: document.getElementById("summary"),
+    sumHoras: document.getElementById("sumHoras"),
+    sumTotal: document.getElementById("sumTotal"),
+    cards: document.getElementById("cards"),
+    refreshBtn: document.getElementById("refreshBtn"),
+    refreshIcon: document.getElementById("refreshIcon"),
+    cfgWorkerUrl: document.getElementById("cfgWorkerUrl"),
+    cfgExtraRate: document.getElementById("cfgExtraRate"),
+    cfgWeeklyCap: document.getElementById("cfgWeeklyCap"),
+    saveSettingsBtn: document.getElementById("saveSettingsBtn"),
+    settingsPanel: document.getElementById("settingsPanel")
+  };
+
+  var config = loadConfig();
+  var salaries = loadSalaries();
+  var week = currentWeekRangeChile();
+  els.weekRange.textContent = "Semana " + week.label;
+
+  els.cfgWorkerUrl.value = config.workerUrl || "";
+  els.cfgExtraRate.value = config.extraRate;
+  els.cfgWeeklyCap.value = config.weeklyCap;
+
+  function setBanner(kind, html){
+    if(!kind){ els.banner.innerHTML = ""; return; }
+    els.banner.innerHTML = '<div class="banner ' + kind + '">' + html + '</div>';
+  }
+
+  function computeRow(entry){
+    var cap = Number(config.weeklyCap) || 42;
+    var extraRate = Number(config.extraRate) || 0;
+    var horas = entry.horasTrabajadas || 0;
+    var horasNormales = Math.min(horas, cap);
+    var horasExtra = Math.max(0, horas - cap);
+    var sueldoMensual = salaries[entry.nombre] || 0;
+    var valorHora = sueldoMensual > 0 ? sueldoMensual / 4.33 / cap : 0;
+    var pagoNormal = valorHora * horasNormales;
+    var pagoExtra = horasExtra * extraRate;
+    var total = pagoNormal + pagoExtra;
+    return { horas: horas, horasNormales: horasNormales, horasExtra: horasExtra, sueldoMensual: sueldoMensual, valorHora: valorHora, pagoNormal: pagoNormal, pagoExtra: pagoExtra, total: total };
+  }
+
+  function renderCards(entries){
+    els.cards.innerHTML = "";
+    if(!entries.length){
+      els.cards.innerHTML = '<div class="card"><p class="empty-hint" style="margin:0;">Sin datos de horas para esta semana.</p></div>';
+      els.summary.hidden = true;
+      return;
+    }
+
+    var totalHorasEquipo = 0;
+    var totalPagarEquipo = 0;
+
+    entries.forEach(function(entry){
+      var calc = computeRow(entry);
+      totalHorasEquipo += calc.horas;
+      totalPagarEquipo += calc.total;
+
+      var cap = Number(config.weeklyCap) || 42;
+      var pctNormal = calc.horas > 0 ? Math.min(calc.horasNormales / cap, 1) * 100 : 0;
+      var pctExtra = calc.horas > 0 ? (calc.horasExtra / cap) * 100 : 0;
+
+      var card = document.createElement("div");
+      card.className = "card";
+
+      var salaryId = "sal-" + entry.nombre.replace(/[^a-zA-Z0-9]/g, "_");
+
+      card.innerHTML =
+        '<div class="card-head">' +
+          '<h2>' + escapeHtml(entry.nombre) + '</h2>' +
+          '<span class="hours-pill num">' + fmtHoras(calc.horas) + '</span>' +
+        '</div>' +
+        '<div class="bar" aria-hidden="true">' +
+          '<div class="seg-normal" style="width:' + pctNormal + '%"></div>' +
+          '<div class="seg-extra" style="width:' + pctExtra + '%"></div>' +
+        '</div>' +
+        '<div class="legend">' +
+          '<span><span class="dot normal"></span>Normal (tope ' + cap + ' h)</span>' +
+          '<span><span class="dot extra"></span>Extra</span>' +
+        '</div>' +
+        '<div class="salary-row">' +
+          '<label for="' + salaryId + '">Sueldo mensual</label>' +
+          '<div class="input-wrap"><span>$</span><input id="' + salaryId + '" type="number" inputmode="numeric" step="1000" value="' + (calc.sueldoMensual || "") + '" placeholder="0"></div>' +
+        '</div>' +
+        (calc.sueldoMensual > 0 ? '' : '<p class="empty-hint">Ingresa el sueldo mensual para calcular el pago.</p>') +
+        '<div class="breakdown">' +
+          '<div class="item"><div class="k">Horas normales</div><div class="v num">' + fmtHoras(calc.horasNormales) + '</div></div>' +
+          '<div class="item"><div class="k">Horas extra</div><div class="v num">' + fmtHoras(calc.horasExtra) + '</div></div>' +
+          '<div class="item"><div class="k">Pago normal</div><div class="v num">' + fmtCLP(calc.pagoNormal) + '</div></div>' +
+          '<div class="item"><div class="k">Pago extra</div><div class="v num">' + fmtCLP(calc.pagoExtra) + '</div></div>' +
+        '</div>' +
+        '<div class="total-row"><span class="k">Total semana</span><span class="v num">' + fmtCLP(calc.total) + '</span></div>';
+
+      els.cards.appendChild(card);
+
+      card.querySelector("#" + CSS.escape(salaryId)).addEventListener("change", function(ev){
+        var val = Number(ev.target.value) || 0;
+        salaries[entry.nombre] = val;
+        saveSalaries(salaries);
+        renderCards(entries);
+      });
+    });
+
+    els.summary.hidden = false;
+    els.sumHoras.textContent = fmtHoras(totalHorasEquipo);
+    els.sumTotal.textContent = fmtCLP(totalPagarEquipo);
+  }
+
+  function escapeHtml(s){
+    return String(s).replace(/[&<>"']/g, function(c){
+      return { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c];
+    });
+  }
+
+  function showSkeleton(){
+    els.cards.innerHTML =
+      '<div class="skeleton"><div class="bar-sk" style="width:40%"></div><div class="bar-sk" style="width:90%"></div><div class="bar-sk" style="width:70%"></div></div>' +
+      '<div class="skeleton"><div class="bar-sk" style="width:35%"></div><div class="bar-sk" style="width:85%"></div><div class="bar-sk" style="width:60%"></div></div>' +
+      '<div class="skeleton"><div class="bar-sk" style="width:45%"></div><div class="bar-sk" style="width:80%"></div><div class="bar-sk" style="width:65%"></div></div>';
+  }
+
+  function load(){
+    setBanner(null, "");
+    showSkeleton();
+    els.refreshIcon.classList.add("spin");
+
+    var url = (config.workerUrl || "").trim();
+    if(!url){
+      setBanner("example",
+        "<div><strong>Datos de ejemplo.</strong> Configura la URL del Worker en <button class=\"link\" onclick=\"document.getElementById('settingsPanel').open=true; document.getElementById('cfgWorkerUrl').focus();\">Configuración</button> para ver las horas reales desde Jibble.</div>"
+      );
+      renderCards(EXAMPLE_DATA);
+      els.refreshIcon.classList.remove("spin");
+      return;
+    }
+
+    var endpoint = url.replace(/\/$/, "") + "/horas-semana?from=" + week.from + "&to=" + week.to;
+
+    fetch(endpoint)
+      .then(function(res){
+        return res.json().then(function(body){
+          if(!res.ok){ throw new Error(body && body.error ? body.error : ("HTTP " + res.status)); }
+          return body;
+        });
+      })
+      .then(function(body){
+        var entries = (body && body.empleados) || [];
+        if(!entries.length){
+          setBanner("error", "<div><strong>El Worker respondió sin trabajadores.</strong> Revisa que JIBBLE_EMPLOYEE_NAMES coincida con los nombres exactos en Jibble, o usa <code>/debug</code> para inspeccionar la respuesta cruda.</div>");
+        }
+        renderCards(entries.length ? entries : EXAMPLE_DATA);
+      })
+      .catch(function(err){
+        setBanner("error",
+          "<div><strong>No se pudo conectar con el Worker.</strong> " + escapeHtml(err.message || "Error desconocido") +
+          ". Mostrando datos de ejemplo mientras tanto. <button class=\"link\" id=\"retryLink\">Reintentar</button></div>"
+        );
+        renderCards(EXAMPLE_DATA);
+        var retry = document.getElementById("retryLink");
+        if(retry) retry.addEventListener("click", load);
+      })
+      .then(function(){ els.refreshIcon.classList.remove("spin"); });
+  }
+
+  els.refreshBtn.addEventListener("click", load);
+  els.saveSettingsBtn.addEventListener("click", function(){
+    config.workerUrl = els.cfgWorkerUrl.value.trim();
+    config.extraRate = Number(els.cfgExtraRate.value) || 0;
+    config.weeklyCap = Number(els.cfgWeeklyCap.value) || 42;
+    saveConfig(config);
+    els.settingsPanel.open = false;
+    load();
+  });
+
+  load();
+})();
+</script>

@@ -1,0 +1,12 @@
+name = "marin376-jibble-horas"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+# Vars no sensibles. Opcional: filtra a los 3 trabajadores del minimarket.
+# Ejemplo: JIBBLE_EMPLOYEE_NAMES = "Juan Perez,Maria Soto,Pedro Diaz"
+[vars]
+JIBBLE_EMPLOYEE_NAMES = ""
+
+# Secrets (NO van aquí). Configurar con:
+#   wrangler secret put JIBBLE_CLIENT_ID
+#   wrangler secret put JIBBLE_CLIENT_SECRET
