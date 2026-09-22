@@ -20,15 +20,19 @@ Al terminar, Wrangler imprime la URL pública, algo como:
 
 Opcional: en `wrangler.toml`, define `JIBBLE_EMPLOYEE_NAMES` con los 3 nombres exactos como aparecen en Jibble, separados por coma, para filtrar la respuesta a solo esos 3 trabajadores. Si lo dejas vacío, el Worker trae a todos.
 
-## 2. Verificar el schema real de Jibble
+## 2. Endpoint de horas (ya verificado)
 
-No se pudo confirmar contra `docs.api.jibble.io` el nombre exacto del campo de horas trabajadas (bloqueo de red al construir esto). El Worker ya intenta los endpoints `TimeTrackingReport` y `Timesheets` con varios nombres de campo comunes (`totalTime`, `duration`, `hours`, etc.), pero **hay que confirmarlo con datos reales**:
+`docs.api.jibble.io` no fue accesible al construir esto, así que el endpoint se confirmó por prueba directa contra la API (endpoint `/discover`, ya removido del código final). El real es:
+
+`GET https://time-tracking.prod.jibble.io/v1/TimeEntries` — eventos de marcaje individuales (`type: "In"` / `"Out"`, `personId`, `belongsToDate`, `time` en UTC), no horas ya sumadas. El Worker empareja cada "In" con su "Out" para calcular horas trabajadas; los marcajes con `breakId` (descansos) se excluyen del cálculo.
+
+Para revisar el cálculo con datos reales:
 
 ```
 curl "https://TU-WORKER.workers.dev/debug"
 ```
 
-Esto devuelve la respuesta cruda de Jibble (personas + horas). Si `empleados` sale vacío o con horas en 0 desde `/horas-semana`, comparte la salida de `/debug` para ajustar el nombre de campo correcto en `worker.js` (función `extractHours`).
+Devuelve `empleados` (con horas ya calculadas), `cantidadDeMarcajes` y una muestra cruda (`marcajesCrudos`) para verificar contra lo que se sabe que trabajó cada persona.
 
 ## 3. Configurar la web app
 

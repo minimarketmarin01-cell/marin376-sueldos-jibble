@@ -1,9 +1,15 @@
 // Worker: horas semanales desde Jibble -> JSON limpio para la web app de sueldos.
 // Secrets requeridos (wrangler secret put): JIBBLE_CLIENT_ID, JIBBLE_CLIENT_SECRET
 // Var opcional: JIBBLE_EMPLOYEE_NAMES = "Nombre Uno,Nombre Dos,Nombre Tres" (filtra a esos 3; si no se define, trae a todos)
+//
+// Endpoint de horas confirmado con /discover contra la API real (no estaba en la
+// doc pública accesible): https://time-tracking.prod.jibble.io/v1/TimeEntries
+// Son eventos de marcaje (type: "In" / "Out") con belongsToDate, personId y time
+// (UTC). Las horas trabajadas se calculan emparejando cada "In" con su "Out".
 
 const JIBBLE_TOKEN_URL = "https://identity.prod.jibble.io/connect/token";
 const JIBBLE_PEOPLE_URL = "https://workspace.prod.jibble.io/v1/People";
+const JIBBLE_TIME_ENTRIES_URL = "https://time-tracking.prod.jibble.io/v1/TimeEntries";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -76,9 +82,28 @@ function extractArray(payload) {
   return [];
 }
 
+function odataUrl(base, params) {
+  const parts = Object.entries(params).map(
+    ([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`
+  );
+  return `${base}?${parts.join("&")}`;
+}
+
+// Sigue @odata.nextLink hasta juntar todas las páginas (con un tope de seguridad).
+async function fetchAllPages(firstUrl, token, maxPages = 20) {
+  let url = firstUrl;
+  let all = [];
+  for (let i = 0; i < maxPages && url; i++) {
+    const payload = await jibbleGet(url, token);
+    all = all.concat(extractArray(payload));
+    url = payload?.["@odata.nextLink"] || null;
+  }
+  return all;
+}
+
 async function getPeopleMap(token) {
-  const payload = await jibbleGet(`${JIBBLE_PEOPLE_URL}?$select=id,fullName`, token);
-  const people = extractArray(payload);
+  const url = odataUrl(JIBBLE_PEOPLE_URL, { $select: "id,fullName" });
+  const people = await fetchAllPages(url, token);
   const map = new Map();
   for (const p of people) {
     const id = p.id ?? p.personId ?? p.memberId;
@@ -88,69 +113,55 @@ async function getPeopleMap(token) {
   return map;
 }
 
-// El campo con las horas trabajadas no está confirmado contra la doc oficial
-// (docs.api.jibble.io no fue accesible al construir este Worker). Se prueba
-// una lista de nombres de campo comunes; /debug expone la respuesta cruda
-// de Jibble para ajustar esto con datos reales una vez conectadas las credenciales.
-const HOURS_FIELD_CANDIDATES = [
-  "totalTime",
-  "totalHours",
-  "totalDuration",
-  "duration",
-  "hours",
-  "workedHours",
-  "totalWorkedTime",
-];
-
-function secondsToHours(value) {
-  // Heurística: si el número es grande, probablemente son segundos, no horas.
-  return value > 200 ? value / 3600 : value;
+async function fetchTimeEntries(token, from, to) {
+  const url = odataUrl(JIBBLE_TIME_ENTRIES_URL, {
+    $filter: `belongsToDate ge ${from} and belongsToDate le ${to}`,
+    $orderby: "personId,time",
+    $top: "500",
+  });
+  return fetchAllPages(url, token);
 }
 
-function extractHours(entry) {
-  for (const field of HOURS_FIELD_CANDIDATES) {
-    const raw = entry[field];
-    if (typeof raw === "number") return secondsToHours(raw);
-    if (typeof raw === "string" && !isNaN(Number(raw))) return secondsToHours(Number(raw));
+// Empareja cada "In" con su siguiente "Out" por persona y suma la duración.
+// Los marcajes con breakId (entrada/salida de un descanso) se excluyen del
+// cálculo de horas trabajadas. Si queda un "In" sin cerrar (turno en curso),
+// se cuentan las horas hasta ahora (o hasta el fin del rango consultado).
+function computeWorkedHours(entries, rangeToISOEnd) {
+  const byPerson = new Map();
+  for (const e of entries) {
+    if (!e.personId || !e.time || !e.type) continue;
+    if (e.breakId) continue;
+    if (!byPerson.has(e.personId)) byPerson.set(e.personId, []);
+    byPerson.get(e.personId).push(e);
   }
-  return 0;
-}
 
-async function fetchHoursRaw(token, from, to) {
-  // Intento 1: TimeTrackingReport con from/to simples.
-  const attempts = [
-    `https://time-tracking.prod.jibble.io/v1/TimeTrackingReport?from=${from}&to=${to}`,
-    `https://time-tracking.prod.jibble.io/v1/Timesheets?$filter=date ge ${from} and date le ${to}`,
-  ];
+  const totals = new Map();
+  const now = Date.now();
+  const rangeEnd = Math.min(now, new Date(rangeToISOEnd).getTime());
 
-  let lastError;
-  for (const url of attempts) {
-    try {
-      return { url, payload: await jibbleGet(url, token) };
-    } catch (e) {
-      lastError = e;
-      if (e.status === 401 || e.status === 403) throw e; // credenciales mal, no seguir probando
-    }
-  }
-  throw lastError;
-}
+  for (const [personId, list] of byPerson) {
+    list.sort((a, b) => new Date(a.time) - new Date(b.time));
+    let pendingIn = null;
+    let total = 0;
 
-// Prueba una lista de URLs contra la API de Jibble y devuelve status + un
-// fragmento del cuerpo de cada una, sin lanzar error. Sirve para descubrir
-// el nombre real de un endpoint cuando no se puede acceder a la doc oficial.
-async function probeUrls(urls, token) {
-  const results = await Promise.all(
-    urls.map(async (url) => {
-      try {
-        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-        const text = await res.text().catch(() => "");
-        return { url, status: res.status, ok: res.ok, body: text.slice(0, 600) };
-      } catch (e) {
-        return { url, status: null, ok: false, body: String(e.message || e).slice(0, 300) };
+    for (const e of list) {
+      if (e.type === "In") {
+        pendingIn = e.time; // si había un "In" previo sin cerrar, se descarta (dato inconsistente)
+      } else if (e.type === "Out" && pendingIn) {
+        total += (new Date(e.time) - new Date(pendingIn)) / 3600000;
+        pendingIn = null;
       }
-    })
-  );
-  return results;
+    }
+
+    if (pendingIn) {
+      const start = new Date(pendingIn).getTime();
+      if (rangeEnd > start) total += (rangeEnd - start) / 3600000;
+    }
+
+    totals.set(personId, total);
+  }
+
+  return totals;
 }
 
 function currentWeekRangeChile() {
@@ -174,20 +185,12 @@ async function handleHorasSemana(url, env) {
   const to = params.get("to") || defaultTo;
 
   const token = await getJibbleToken(env);
-  const [peopleMap, hoursRes] = await Promise.all([
+  const [peopleMap, entries] = await Promise.all([
     getPeopleMap(token),
-    fetchHoursRaw(token, from, to),
+    fetchTimeEntries(token, from, to),
   ]);
 
-  const entries = extractArray(hoursRes.payload);
-  const totals = new Map(); // personId -> horas acumuladas
-
-  for (const entry of entries) {
-    const personId = entry.personId ?? entry.memberId ?? entry.id ?? entry.person?.id;
-    if (!personId) continue;
-    const hours = extractHours(entry);
-    totals.set(personId, (totals.get(personId) || 0) + hours);
-  }
+  const totals = computeWorkedHours(entries, `${to}T23:59:59Z`);
 
   const allowedNames = (env.JIBBLE_EMPLOYEE_NAMES || "")
     .split(",")
@@ -219,44 +222,26 @@ export default {
       }
 
       if (url.pathname === "/debug" && request.method === "GET") {
-        // Devuelve la respuesta cruda de Jibble para verificar nombres de campo reales.
+        // Devuelve la respuesta cruda de Jibble para verificar el cálculo.
         const params = url.searchParams;
         const { from: defaultFrom, to: defaultTo } = currentWeekRangeChile();
         const from = params.get("from") || defaultFrom;
         const to = params.get("to") || defaultTo;
         const token = await getJibbleToken(env);
-        const people = await jibbleGet(`${JIBBLE_PEOPLE_URL}?$select=id,fullName`, token);
-        const hours = await fetchHoursRaw(token, from, to);
-        return json({ from, to, people, horasEndpointUsado: hours.url, horasRaw: hours.payload });
+        const [peopleMap, entries] = await Promise.all([
+          getPeopleMap(token),
+          fetchTimeEntries(token, from, to),
+        ]);
+        const totals = computeWorkedHours(entries, `${to}T23:59:59Z`);
+        const empleados = [...totals].map(([personId, horas]) => ({
+          personId,
+          nombre: peopleMap.get(personId) || personId,
+          horasTrabajadas: Math.round(horas * 100) / 100,
+        }));
+        return json({ from, to, empleados, cantidadDeMarcajes: entries.length, marcajesCrudos: entries.slice(0, 20) });
       }
 
-      if (url.pathname === "/discover" && request.method === "GET") {
-        // Prueba endpoints candidatos de horas/timesheets para encontrar el real.
-        const token = await getJibbleToken(env);
-        const bases = [
-          "https://time-tracking.prod.jibble.io/v1",
-          "https://workspace.prod.jibble.io/v1",
-        ];
-        const names = [
-          "", // raíz OData: suele listar los entity sets disponibles
-          "Activities",
-          "ActivityEntries",
-          "TimeEntries",
-          "HoursEntries",
-          "Entries",
-          "Attendances",
-          "TimesheetEntries",
-          "ClockEntries",
-          "WorkedHours",
-          "Reports",
-          "TimeTracking",
-        ];
-        const urls = bases.flatMap((base) => names.map((n) => (n ? `${base}/${n}` : `${base}/`)));
-        const results = await probeUrls(urls, token);
-        return json({ results });
-      }
-
-      return json({ error: "Ruta no encontrada. Usa GET /horas-semana, GET /debug o GET /discover." }, 404);
+      return json({ error: "Ruta no encontrada. Usa GET /horas-semana o GET /debug." }, 404);
     } catch (err) {
       const status = err.status || 500;
       return json({ error: err.message || "Error interno" }, status);
