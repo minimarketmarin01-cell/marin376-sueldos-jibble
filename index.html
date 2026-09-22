@@ -461,7 +461,11 @@
   .marcaje-row .tipo-dot.break{ background: var(--warn); }
   .marcaje-row .tipo-dot.otro{ background: var(--ink-muted); }
   .marcaje-row .tipo-label{ flex: 1; font-size: 13px; }
+  .marcaje-row .marcaje-right{
+    display: flex; flex-direction: column; align-items: flex-end; gap: 1px; flex: none;
+  }
   .marcaje-row .tipo-hora{ font-size: 13px; font-weight: 600; }
+  .marcaje-row .tipo-duracion{ font-size: 11px; color: var(--ink-muted); }
 
   .skeleton{
     background: var(--surface);
@@ -610,12 +614,6 @@
     var h = Math.floor(totalMin / 60);
     var m = totalMin % 60;
     return h + "h " + m + "m";
-  }
-  function fmtHorasCompacto(n){
-    var totalMin = Math.round((n || 0) * 60);
-    var h = Math.floor(totalMin / 60);
-    var m = totalMin % 60;
-    return h + ":" + (m < 10 ? "0" : "") + m;
   }
   function fmtHoraDelDia(iso){
     return new Date(iso).toLocaleTimeString("es-CL", { hour: "2-digit", minute: "2-digit", timeZone: "America/Santiago" });
@@ -822,7 +820,7 @@
     return '<div class="week-grid">' + week.days.map(function(d){
       var h = porDia[d.iso];
       var cls = "day" + (d.iso === todayIso ? " today" : "") + (h ? "" : " empty");
-      var val = h ? fmtHorasCompacto(h) : "–";
+      var val = h ? fmtHoras(h) : "–";
       return '<button type="button" class="' + cls + '" data-fecha="' + d.iso + '"' + (h ? "" : " disabled") + '>' +
         '<div class="d">' + d.label + '</div><div class="h num">' + val + '</div></button>';
     }).join("") + '</div>';
@@ -842,12 +840,17 @@
     if(!eventos || !eventos.length){
       els.dayModalBody.innerHTML = '<p class="empty-hint" style="margin:0;">Sin marcajes ese día.</p>';
     }else{
-      els.dayModalBody.innerHTML = '<div class="marcaje-list">' + eventos.map(function(ev){
+      els.dayModalBody.innerHTML = '<div class="marcaje-list">' + eventos.map(function(ev, i){
         var info = TIPO_MARCAJE[ev.tipo] || { label: ev.tipo, cls: "otro" };
+        var siguiente = eventos[i + 1];
+        var duracion = siguiente ? fmtHoras((new Date(siguiente.hora) - new Date(ev.hora)) / 3600000) : "–";
         return '<div class="marcaje-row">' +
           '<span class="tipo-dot ' + info.cls + '"></span>' +
           '<span class="tipo-label">' + escapeHtml(info.label) + '</span>' +
-          '<span class="tipo-hora num">' + fmtHoraDelDia(ev.hora) + '</span>' +
+          '<span class="marcaje-right">' +
+            '<span class="tipo-hora num">' + fmtHoraDelDia(ev.hora) + '</span>' +
+            '<span class="tipo-duracion num">' + duracion + '</span>' +
+          '</span>' +
         '</div>';
       }).join("") + '</div>';
     }
