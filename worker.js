@@ -122,13 +122,62 @@ async function fetchTimeEntries(token, from, to) {
   return fetchAllPages(url, token);
 }
 
+// Fecha calendario (YYYY-MM-DD) en America/Santiago para un instante ISO dado.
+function chileLocalDate(isoTime) {
+  return CHILE_DATE_FMT.format(new Date(isoTime));
+}
+const CHILE_DATE_FMT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/Santiago",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+// Instante UTC (ms) del primer momento que ya pertenece a un dia distinto de
+// `fromTime`, buscando por biseccion entre fromTime y toTime (que se sabe
+// caen en dias distintos). Evita asumir un offset fijo (Chile puede tener
+// horario de verano).
+function findDayBoundary(fromTime, toTime) {
+  const startDate = chileLocalDate(fromTime);
+  let lo = new Date(fromTime).getTime();
+  let hi = new Date(toTime).getTime();
+  while (hi - lo > 1000) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (chileLocalDate(mid) === startDate) lo = mid;
+    else hi = mid;
+  }
+  return hi;
+}
+
+// Reparte la duracion de un tramo entre los dias calendario (Chile) que
+// cruza, igual que Jibble divide la jornada a medianoche local.
+function splitTramoPorDia(fromTime, toTime) {
+  const segments = [];
+  let cursor = fromTime;
+  let cursorDate = chileLocalDate(cursor);
+  const endDate = chileLocalDate(toTime);
+  let guard = 0;
+  while (cursorDate !== endDate && guard < 10) {
+    const boundary = findDayBoundary(cursor, toTime);
+    const hrs = (boundary - new Date(cursor).getTime()) / 3600000;
+    if (hrs > 0) segments.push({ dia: cursorDate, horas: hrs });
+    cursor = new Date(boundary).toISOString();
+    cursorDate = chileLocalDate(cursor);
+    guard++;
+  }
+  const hrsLast = (new Date(toTime).getTime() - new Date(cursor).getTime()) / 3600000;
+  if (hrsLast > 0) segments.push({ dia: cursorDate, horas: hrsLast });
+  return segments;
+}
+
 // Empareja cada "In" con el siguiente cierre de tramo por persona y suma la
-// duración, tanto el total semanal como el desglose por día (belongsToDate
-// del "In" que abrió el tramo). En datos reales, "StartBreak" cierra el
-// tramo trabajado (no el campo breakId, que viene en null); para retomar,
-// Jibble reusa el tipo "In" en vez de "EndBreak". Si queda un "In" sin
-// cerrar (turno en curso), se cuentan las horas hasta ahora (o hasta el
-// fin del rango consultado).
+// duración semanal, repartiendo cada tramo entre los días calendario que
+// cruza (igual que Jibble, que divide la jornada a medianoche local) para
+// el desglose por día. En datos reales, "StartBreak" cierra el tramo
+// trabajado (no el campo breakId, que viene en null); para retomar, Jibble
+// reusa el tipo "In" en vez de "EndBreak". Si queda un "In" sin cerrar
+// (turno en curso), se cuentan las horas hasta ahora (o hasta el fin del
+// rango consultado).
 function computeWorkedHours(entries, rangeToISOEnd) {
   const byPerson = new Map();
   for (const e of entries) {
@@ -149,10 +198,10 @@ function computeWorkedHours(entries, rangeToISOEnd) {
     const eventosPorDia = new Map(); // fecha -> [{ tipo, hora }] (todos los marcajes crudos del dia)
 
     const addTramo = (fromEntry, toTime) => {
-      const hrs = (new Date(toTime) - new Date(fromEntry.time)) / 3600000;
-      total += hrs;
-      const dia = fromEntry.belongsToDate || fromEntry.time.slice(0, 10);
-      porDia.set(dia, (porDia.get(dia) || 0) + hrs);
+      total += (new Date(toTime) - new Date(fromEntry.time)) / 3600000;
+      for (const seg of splitTramoPorDia(fromEntry.time, toTime)) {
+        porDia.set(seg.dia, (porDia.get(seg.dia) || 0) + seg.horas);
+      }
     };
 
     for (const e of list) {
