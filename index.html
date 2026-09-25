@@ -106,6 +106,32 @@
     font-size: 13px; color: var(--ink-muted); margin-top: 2px;
   }
   .week-range .label{ min-width: 0; }
+
+  .cuenta-tabs{
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 2px 2px 6px;
+    margin-bottom: 8px;
+    scrollbar-width: none;
+  }
+  .cuenta-tabs::-webkit-scrollbar{ display: none; }
+  .cuenta-tab{
+    flex: none;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--ink-muted);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 14px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .cuenta-tab.active{
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--surface);
+  }
   button.week-nav-btn{
     border: none;
     background: transparent;
@@ -499,6 +525,7 @@
   </div>
 </header>
 
+<div class="cuenta-tabs" id="cuentaTabs" hidden></div>
 <div id="installBanner"></div>
 <div id="banner"></div>
 
@@ -566,6 +593,12 @@
 
   var DEFAULTS = { workerUrl: "", extraRate: 4000, weeklyCap: 42 };
 
+  // La cuenta "1" (Marín 376, la original) usa las llaves de siempre, sin
+  // sufijo, para no perder los datos ya guardados. Cuentas nuevas (otros
+  // locales) quedan aparte con su propio sufijo.
+  var cuentaActual = "1";
+  function storageKey(base){ return cuentaActual === "1" ? base : base + "." + cuentaActual; }
+
   function loadConfig(){
     try{
       var raw = localStorage.getItem("planilla.config");
@@ -579,33 +612,33 @@
   }
   function loadSalaries(){
     try{
-      var raw = localStorage.getItem("planilla.sueldos");
+      var raw = localStorage.getItem(storageKey("planilla.sueldos"));
       return raw ? JSON.parse(raw) : {};
     }catch(e){ return {}; }
   }
   function saveSalaries(map){
-    try{ localStorage.setItem("planilla.sueldos", JSON.stringify(map)); }catch(e){}
+    try{ localStorage.setItem(storageKey("planilla.sueldos"), JSON.stringify(map)); }catch(e){}
   }
 
   function loadModos(){
     try{
-      var raw = localStorage.getItem("planilla.modoPago");
+      var raw = localStorage.getItem(storageKey("planilla.modoPago"));
       return raw ? JSON.parse(raw) : {};
     }catch(e){ return {}; }
   }
   function saveModos(map){
-    try{ localStorage.setItem("planilla.modoPago", JSON.stringify(map)); }catch(e){}
+    try{ localStorage.setItem(storageKey("planilla.modoPago"), JSON.stringify(map)); }catch(e){}
   }
 
   // fecha (from-to de la semana) -> true si ya se pago.
   function loadPagadas(){
     try{
-      var raw = localStorage.getItem("planilla.semanasPagadas");
+      var raw = localStorage.getItem(storageKey("planilla.semanasPagadas"));
       return raw ? JSON.parse(raw) : {};
     }catch(e){ return {}; }
   }
   function savePagadas(map){
-    try{ localStorage.setItem("planilla.semanasPagadas", JSON.stringify(map)); }catch(e){}
+    try{ localStorage.setItem(storageKey("planilla.semanasPagadas"), JSON.stringify(map)); }catch(e){}
   }
 
   var CLP = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
@@ -736,7 +769,8 @@
     dayModalTitle: document.getElementById("dayModalTitle"),
     dayModalSubtitle: document.getElementById("dayModalSubtitle"),
     dayModalBody: document.getElementById("dayModalBody"),
-    dayModalClose: document.getElementById("dayModalClose")
+    dayModalClose: document.getElementById("dayModalClose"),
+    cuentaTabs: document.getElementById("cuentaTabs")
   };
 
   els.dayModalClose.addEventListener("click", closeDayModal);
@@ -745,15 +779,65 @@
   });
 
   var config = loadConfig();
-  var salaries = loadSalaries();
-  for(var defaultName in DEFAULT_SALARIES){
-    if(!(defaultName in salaries)) salaries[defaultName] = DEFAULT_SALARIES[defaultName];
+  var salaries, modos, pagadas;
+
+  // Los valores por defecto (sueldo/modo de Marlene) son del equipo de la
+  // cuenta principal - no tendrian sentido para los trabajadores de otro
+  // local, asi que solo se aplican en la cuenta "1".
+  function loadCuentaData(){
+    salaries = loadSalaries();
+    modos = loadModos();
+    pagadas = loadPagadas();
+    if(cuentaActual === "1"){
+      for(var defaultName in DEFAULT_SALARIES){
+        if(!(defaultName in salaries)) salaries[defaultName] = DEFAULT_SALARIES[defaultName];
+      }
+      for(var defaultModoName in DEFAULT_MODOS){
+        if(!(defaultModoName in modos)) modos[defaultModoName] = DEFAULT_MODOS[defaultModoName];
+      }
+    }
   }
-  var modos = loadModos();
-  for(var defaultModoName in DEFAULT_MODOS){
-    if(!(defaultModoName in modos)) modos[defaultModoName] = DEFAULT_MODOS[defaultModoName];
+  loadCuentaData();
+
+  var cuentasDisponibles = [{ id: "1", nombre: "Cuenta principal" }];
+
+  function renderCuentaTabs(){
+    if(cuentasDisponibles.length < 2){
+      els.cuentaTabs.hidden = true;
+      els.cuentaTabs.innerHTML = "";
+      return;
+    }
+    els.cuentaTabs.hidden = false;
+    els.cuentaTabs.innerHTML = cuentasDisponibles.map(function(c){
+      return '<button type="button" class="cuenta-tab' + (c.id === cuentaActual ? " active" : "") + '" data-cuenta="' + c.id + '">' +
+        escapeHtml(c.nombre) + '</button>';
+    }).join("");
+    els.cuentaTabs.querySelectorAll(".cuenta-tab").forEach(function(btn){
+      btn.addEventListener("click", function(){ switchCuenta(btn.getAttribute("data-cuenta")); });
+    });
   }
-  var pagadas = loadPagadas();
+
+  function switchCuenta(id){
+    if(id === cuentaActual) return;
+    cuentaActual = id;
+    loadCuentaData();
+    renderCuentaTabs();
+    load();
+  }
+
+  function fetchCuentas(){
+    var url = (config.workerUrl || "").trim();
+    if(!url) return;
+    fetch(url.replace(/\/$/, "") + "/cuentas")
+      .then(function(res){ return res.ok ? res.json() : null; })
+      .then(function(body){
+        if(body && Array.isArray(body.cuentas) && body.cuentas.length){
+          cuentasDisponibles = body.cuentas;
+          renderCuentaTabs();
+        }
+      })
+      .catch(function(){ /* Worker viejo sin /cuentas, o sin conexion: se queda con 1 sola cuenta */ });
+  }
 
   var todayIso = fmtISO(chileNowDate());
   var currentWeekMonday = mondayOf(chileNowDate());
@@ -1025,7 +1109,7 @@
       return;
     }
 
-    var endpoint = url.replace(/\/$/, "") + "/horas-semana?from=" + week.from + "&to=" + week.to;
+    var endpoint = url.replace(/\/$/, "") + "/horas-semana?cuenta=" + encodeURIComponent(cuentaActual) + "&from=" + week.from + "&to=" + week.to;
 
     fetch(endpoint)
       .then(function(res){
@@ -1060,6 +1144,7 @@
     config.weeklyCap = Number(els.cfgWeeklyCap.value) || 42;
     saveConfig(config);
     els.settingsPanel.open = false;
+    fetchCuentas();
     load();
   });
 
@@ -1119,6 +1204,7 @@
     navigator.serviceWorker.register("sw.js").catch(function(){});
   }
 
+  fetchCuentas();
   load();
 })();
 </script>
