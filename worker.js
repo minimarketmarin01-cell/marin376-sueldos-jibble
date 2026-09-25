@@ -1,6 +1,12 @@
 // Worker: horas semanales desde Jibble -> JSON limpio para la web app de sueldos.
-// Secrets requeridos (wrangler secret put): JIBBLE_CLIENT_ID, JIBBLE_CLIENT_SECRET
-// Var opcional: JIBBLE_EMPLOYEE_NAMES = "Nombre Uno,Nombre Dos,Nombre Tres" (filtra a esos 3; si no se define, trae a todos)
+// Soporta varias cuentas/organizaciones Jibble (ej. distintos locales), cada
+// una con sus propios secrets. La cuenta "1" (o sin sufijo) es la original:
+//   JIBBLE_CLIENT_ID, JIBBLE_CLIENT_SECRET, JIBBLE_EMPLOYEE_NAMES (opcional),
+//   JIBBLE_CUENTA_NOMBRE (opcional, nombre para mostrar).
+// Cuentas adicionales usan sufijo _2, _3, _4:
+//   JIBBLE_CLIENT_ID_2, JIBBLE_CLIENT_SECRET_2, JIBBLE_EMPLOYEE_NAMES_2,
+//   JIBBLE_CUENTA_NOMBRE_2, etc. Los endpoints reciben ?cuenta=2 (default "1").
+// GET /cuentas lista las cuentas con credenciales configuradas.
 //
 // Endpoint de horas confirmado con /discover contra la API real (no estaba en la
 // doc pública accesible): https://time-tracking.prod.jibble.io/v1/TimeEntries
@@ -10,6 +16,7 @@
 const JIBBLE_TOKEN_URL = "https://identity.prod.jibble.io/connect/token";
 const JIBBLE_PEOPLE_URL = "https://workspace.prod.jibble.io/v1/People";
 const JIBBLE_TIME_ENTRIES_URL = "https://time-tracking.prod.jibble.io/v1/TimeEntries";
+const CUENTAS_SOPORTADAS = ["1", "2", "3", "4"];
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -17,9 +24,9 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
-// Cache de token en memoria del isolate (evita pedir token en cada request).
-let cachedToken = null;
-let cachedTokenExpiresAt = 0;
+// Cache de tokens en memoria del isolate, uno por cuenta (evita pedir token
+// en cada request).
+const cachedTokens = new Map(); // cuenta -> { token, expiresAt }
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -28,14 +35,35 @@ function json(data, status = 200) {
   });
 }
 
-async function getJibbleToken(env) {
+// Credenciales y config de una cuenta Jibble a partir de los secrets/vars
+// del Worker, usando el sufijo correspondiente (_2, _3, _4; "1" sin sufijo).
+function getCuentaConfig(env, cuenta) {
+  const suffix = !cuenta || cuenta === "1" ? "" : `_${cuenta}`;
+  return {
+    id: cuenta || "1",
+    clientId: env[`JIBBLE_CLIENT_ID${suffix}`],
+    clientSecret: env[`JIBBLE_CLIENT_SECRET${suffix}`],
+    employeeNames: env[`JIBBLE_EMPLOYEE_NAMES${suffix}`] || "",
+    nombre: env[`JIBBLE_CUENTA_NOMBRE${suffix}`] || (suffix ? `Cuenta ${cuenta}` : "Cuenta principal"),
+  };
+}
+
+function listCuentasConfiguradas(env) {
+  return CUENTAS_SOPORTADAS.map((id) => getCuentaConfig(env, id)).filter(
+    (c) => c.clientId && c.clientSecret
+  );
+}
+
+async function getJibbleToken(cuentaConfig) {
+  const { id: cuenta, clientId, clientSecret } = cuentaConfig;
+  const cached = cachedTokens.get(cuenta);
   const now = Date.now();
-  if (cachedToken && now < cachedTokenExpiresAt) return cachedToken;
+  if (cached && now < cached.expiresAt) return cached.token;
 
   const body = new URLSearchParams({
     grant_type: "client_credentials",
-    client_id: env.JIBBLE_CLIENT_ID,
-    client_secret: env.JIBBLE_CLIENT_SECRET,
+    client_id: clientId,
+    client_secret: clientSecret,
   });
 
   const res = await fetch(JIBBLE_TOKEN_URL, {
@@ -47,17 +75,17 @@ async function getJibbleToken(env) {
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     const err = new Error(
-      `AUTH_FAILED: Jibble rechazó las credenciales (HTTP ${res.status}). ${detail}`.slice(0, 500)
+      `AUTH_FAILED: Jibble rechazó las credenciales de la cuenta "${cuenta}" (HTTP ${res.status}). ${detail}`.slice(0, 500)
     );
     err.status = res.status === 401 || res.status === 403 ? res.status : 502;
     throw err;
   }
 
   const data = await res.json();
-  cachedToken = data.access_token;
+  const token = data.access_token;
   // Refresca 60s antes de que expire.
-  cachedTokenExpiresAt = now + Math.max((data.expires_in || 3600) - 60, 30) * 1000;
-  return cachedToken;
+  cachedTokens.set(cuenta, { token, expiresAt: now + Math.max((data.expires_in || 3600) - 60, 30) * 1000 });
+  return token;
 }
 
 async function jibbleGet(url, token) {
@@ -277,13 +305,28 @@ function currentWeekRangeChile() {
   return { from: fmt(monday), to: fmt(sunday) };
 }
 
+function getCuentaConfigOrThrow(env, cuentaId) {
+  const cuenta = getCuentaConfig(env, cuentaId);
+  if (!cuenta.clientId || !cuenta.clientSecret) {
+    const err = new Error(
+      `La cuenta "${cuentaId}" no tiene credenciales configuradas (faltan JIBBLE_CLIENT_ID${
+        cuentaId === "1" ? "" : "_" + cuentaId
+      } / JIBBLE_CLIENT_SECRET${cuentaId === "1" ? "" : "_" + cuentaId} como Secret).`
+    );
+    err.status = 400;
+    throw err;
+  }
+  return cuenta;
+}
+
 async function handleHorasSemana(url, env) {
   const params = url.searchParams;
+  const cuenta = getCuentaConfigOrThrow(env, params.get("cuenta") || "1");
   const { from: defaultFrom, to: defaultTo } = currentWeekRangeChile();
   const from = params.get("from") || defaultFrom;
   const to = params.get("to") || defaultTo;
 
-  const token = await getJibbleToken(env);
+  const token = await getJibbleToken(cuenta);
   const [peopleMap, entries] = await Promise.all([
     getPeopleMap(token),
     fetchTimeEntries(token, from, to),
@@ -291,7 +334,7 @@ async function handleHorasSemana(url, env) {
 
   const totals = computeWorkedHours(entries, `${to}T23:59:59Z`);
 
-  const allowedNames = (env.JIBBLE_EMPLOYEE_NAMES || "")
+  const allowedNames = cuenta.employeeNames
     .split(",")
     .map((n) => n.trim())
     .filter(Boolean);
@@ -308,7 +351,7 @@ async function handleHorasSemana(url, env) {
     });
   }
 
-  return { from, to, empleados: result };
+  return { cuenta: cuenta.id, nombreCuenta: cuenta.nombre, from, to, empleados: result };
 }
 
 function roundPorDia(porDiaMap) {
@@ -340,10 +383,11 @@ export default {
       if (url.pathname === "/debug" && request.method === "GET") {
         // Devuelve la respuesta cruda de Jibble para verificar el cálculo.
         const params = url.searchParams;
+        const cuenta = getCuentaConfigOrThrow(env, params.get("cuenta") || "1");
         const { from: defaultFrom, to: defaultTo } = currentWeekRangeChile();
         const from = params.get("from") || defaultFrom;
         const to = params.get("to") || defaultTo;
-        const token = await getJibbleToken(env);
+        const token = await getJibbleToken(cuenta);
         const [peopleMap, entries] = await Promise.all([
           getPeopleMap(token),
           fetchTimeEntries(token, from, to),
@@ -355,10 +399,15 @@ export default {
           horasTrabajadas: Math.round(total * 100) / 100,
           porDia: roundPorDia(porDia),
         }));
-        return json({ from, to, empleados, cantidadDeMarcajes: entries.length, marcajesCrudos: entries.slice(0, 20) });
+        return json({ cuenta: cuenta.id, from, to, empleados, cantidadDeMarcajes: entries.length, marcajesCrudos: entries.slice(0, 20) });
       }
 
-      return json({ error: "Ruta no encontrada. Usa GET /horas-semana o GET /debug." }, 404);
+      if (url.pathname === "/cuentas" && request.method === "GET") {
+        const cuentas = listCuentasConfiguradas(env).map((c) => ({ id: c.id, nombre: c.nombre }));
+        return json({ cuentas });
+      }
+
+      return json({ error: "Ruta no encontrada. Usa GET /horas-semana, GET /debug o GET /cuentas." }, 404);
     } catch (err) {
       const status = err.status || 500;
       return json({ error: err.message || "Error interno" }, status);
