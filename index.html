@@ -1290,9 +1290,9 @@
       .then(function(body){
         var entries = (body && body.empleados) || [];
         if(!entries.length){
-          setBanner("error", "<div><strong>El Worker respondió sin trabajadores.</strong> Revisa que JIBBLE_EMPLOYEE_NAMES coincida con los nombres exactos en Jibble, o usa <code>/debug</code> para inspeccionar la respuesta cruda.</div>");
+          setBanner("example", "<div><strong>Sin marcajes todavía esta semana.</strong> Si esperabas ver horas, revisa que <code>JIBBLE_EMPLOYEE_NAMES</code> coincida con los nombres exactos en Jibble, o usa <code>/debug</code> para inspeccionar la respuesta cruda.</div>");
         }
-        renderCards(entries.length ? entries : EXAMPLE_DATA);
+        renderCards(entries);
       })
       .catch(function(err){
         setBanner("error",
