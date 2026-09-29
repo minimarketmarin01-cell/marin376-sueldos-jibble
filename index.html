@@ -556,6 +556,19 @@
   .marcaje-row .tipo-hora{ font-size: 13px; font-weight: 600; }
   .marcaje-row .tipo-duracion{ font-size: 11px; color: var(--ink-muted); }
 
+  .jibble-link{
+    display: block;
+    text-align: center;
+    margin-top: 14px;
+    padding: 12px;
+    border-radius: 12px;
+    background: var(--accent-soft);
+    color: var(--accent-ink);
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+  }
+
   .skeleton{
     background: var(--surface);
     border: 1px solid var(--border);
@@ -1098,6 +1111,7 @@
         '</div>';
       }).join("") + '</div>';
     }
+    els.dayModalBody.innerHTML += '<a class="jibble-link" href="https://web.jibble.io/timesheets/overview/' + fecha + '/week" target="_blank" rel="noopener">Corregir en Jibble ↗</a>';
     els.dayModalOverlay.hidden = false;
   }
 
