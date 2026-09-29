@@ -210,6 +210,9 @@ function computeWorkedHours(entries, rangeToISOEnd) {
   const byPerson = new Map();
   for (const e of entries) {
     if (!e.personId || !e.time || !e.type) continue;
+    // Jibble no borra el marcaje al eliminarlo, lo deja con status
+    // "Archived" pero lo sigue devolviendo en la respuesta.
+    if (e.status === "Archived") continue;
     if (!byPerson.has(e.personId)) byPerson.set(e.personId, []);
     byPerson.get(e.personId).push(e);
   }
