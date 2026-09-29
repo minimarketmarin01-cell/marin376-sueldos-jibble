@@ -831,7 +831,7 @@
     for(var i = 0; i < 7; i++){
       var d = new Date(monday);
       d.setUTCDate(monday.getUTCDate() + i);
-      days.push({ iso: fmtISO(d), label: DAY_LETTERS[i] });
+      days.push({ iso: fmtISO(d), label: DAY_LETTERS[i], numero: d.getUTCDate() });
     }
     return { from: fmtISO(monday), to: fmtISO(sunday), label: fmtLong(monday) + " – " + fmtLong(sunday), days: days };
   }
@@ -1078,7 +1078,7 @@
       var cls = "day" + (d.iso === todayIso ? " today" : "") + (h ? "" : " empty") + (esFeriado(d.iso) ? " feriado" : "");
       var val = h ? fmtHoras(h) : "–";
       return '<button type="button" class="' + cls + '" data-fecha="' + d.iso + '"' + (h ? "" : " disabled") + '>' +
-        '<div class="d">' + d.label + '</div><div class="h num">' + val + '</div></button>';
+        '<div class="d">' + d.label + ' <span class="num">' + d.numero + '</span></div><div class="h num">' + val + '</div></button>';
     }).join("") + '</div>';
   }
 
