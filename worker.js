@@ -20,7 +20,7 @@ const CUENTAS_SOPORTADAS = ["1", "2", "3", "4"];
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, PUT, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type",
 };
 
@@ -369,6 +369,45 @@ function eventosPorDiaToObj(eventosPorDiaMap) {
   return out;
 }
 
+// Estado compartido entre todos los dispositivos donde este instalada la
+// app (sueldos, modo de pago, semanas pagadas): guardado en KV en vez de
+// solo en el navegador de cada celular. feriadosExtra es global (no por
+// cuenta), porque es el mismo calendario para todos los locales.
+async function handleGetEstado(url, env) {
+  const cuenta = url.searchParams.get("cuenta") || "1";
+  const [estadoRaw, feriadosRaw] = await Promise.all([
+    env.ESTADO.get(`estado:${cuenta}`),
+    env.ESTADO.get("feriadosExtra"),
+  ]);
+  const estado = estadoRaw ? JSON.parse(estadoRaw) : {};
+  return {
+    sueldos: estado.sueldos || {},
+    modos: estado.modos || {},
+    pagadas: estado.pagadas || {},
+    feriadosExtra: feriadosRaw ? JSON.parse(feriadosRaw) : {},
+  };
+}
+
+async function handlePutEstado(request, url, env) {
+  const cuenta = url.searchParams.get("cuenta") || "1";
+  const body = await request.json();
+
+  if (body.feriadosExtra !== undefined) {
+    await env.ESTADO.put("feriadosExtra", JSON.stringify(body.feriadosExtra));
+  }
+
+  if (body.sueldos !== undefined || body.modos !== undefined || body.pagadas !== undefined) {
+    const current = await env.ESTADO.get(`estado:${cuenta}`);
+    const estado = current ? JSON.parse(current) : {};
+    if (body.sueldos !== undefined) estado.sueldos = body.sueldos;
+    if (body.modos !== undefined) estado.modos = body.modos;
+    if (body.pagadas !== undefined) estado.pagadas = body.pagadas;
+    await env.ESTADO.put(`estado:${cuenta}`, JSON.stringify(estado));
+  }
+
+  return { ok: true };
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -410,7 +449,15 @@ export default {
         return json({ cuentas });
       }
 
-      return json({ error: "Ruta no encontrada. Usa GET /horas-semana, GET /debug o GET /cuentas." }, 404);
+      if (url.pathname === "/estado" && request.method === "GET") {
+        return json(await handleGetEstado(url, env));
+      }
+
+      if (url.pathname === "/estado" && request.method === "PUT") {
+        return json(await handlePutEstado(request, url, env));
+      }
+
+      return json({ error: "Ruta no encontrada. Usa GET /horas-semana, GET /debug, GET /cuentas o GET|PUT /estado." }, 404);
     } catch (err) {
       const status = err.status || 500;
       return json({ error: err.message || "Error interno" }, status);

@@ -10,3 +10,9 @@ JIBBLE_EMPLOYEE_NAMES = ""
 # Secrets (NO van aquí). Configurar con:
 #   wrangler secret put JIBBLE_CLIENT_ID
 #   wrangler secret put JIBBLE_CLIENT_SECRET
+
+# Estado compartido (sueldos, modo de pago, semanas pagadas, feriados
+# extra) entre todos los celulares donde esté instalada la app.
+[[kv_namespaces]]
+binding = "ESTADO"
+id = "94d43987118b49d6a53311e1d6eb964e"
