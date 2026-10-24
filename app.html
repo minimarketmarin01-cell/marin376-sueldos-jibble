@@ -681,6 +681,20 @@
   function saveConfig(cfg){
     try{ localStorage.setItem("planilla.config", JSON.stringify(cfg)); }catch(e){}
   }
+  // Empuja una categoria de estado (sueldos/modos/pagadas/feriadosExtra) al
+  // Worker para que se vea igual en todos los celulares con la app
+  // instalada. Mejor esfuerzo: si falla (sin red, Worker no configurado),
+  // el cambio queda igual guardado localmente.
+  function pushEstado(partial){
+    var url = (config.workerUrl || "").trim();
+    if(!url) return;
+    fetch(url.replace(/\/$/, "") + "/estado?cuenta=" + encodeURIComponent(cuentaActual), {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(partial)
+    }).catch(function(){});
+  }
+
   function loadSalaries(){
     try{
       var raw = localStorage.getItem(storageKey("planilla.sueldos"));
@@ -689,6 +703,7 @@
   }
   function saveSalaries(map){
     try{ localStorage.setItem(storageKey("planilla.sueldos"), JSON.stringify(map)); }catch(e){}
+    pushEstado({ sueldos: map });
   }
 
   function loadModos(){
@@ -699,6 +714,7 @@
   }
   function saveModos(map){
     try{ localStorage.setItem(storageKey("planilla.modoPago"), JSON.stringify(map)); }catch(e){}
+    pushEstado({ modos: map });
   }
 
   // fecha (from-to de la semana) -> true si ya se pago.
@@ -710,6 +726,7 @@
   }
   function savePagadas(map){
     try{ localStorage.setItem(storageKey("planilla.semanasPagadas"), JSON.stringify(map)); }catch(e){}
+    pushEstado({ pagadas: map });
   }
 
   var CLP = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
@@ -767,6 +784,7 @@
   }
   function saveFeriadosExtra(map){
     try{ localStorage.setItem("planilla.feriadosExtra", JSON.stringify(map)); }catch(e){}
+    pushEstado({ feriadosExtra: map });
   }
   var feriadosExtra = loadFeriadosExtra();
 
@@ -915,6 +933,43 @@
     }
   }
   loadCuentaData();
+
+  // Combina lo guardado en este celular con lo que ya hay en el Worker
+  // (compartido entre todos los celulares). Si alguno tenia algo que el
+  // otro no, se fusiona y se vuelve a guardar, para que ambos queden
+  // igual. Asi "semana pagada" marcada en un telefono se ve en los demas.
+  function mergeYSincronizar(local, servidor, categoria){
+    var merged = Object.assign({}, local, servidor);
+    if(JSON.stringify(merged) !== JSON.stringify(servidor)){
+      var partial = {};
+      partial[categoria] = merged;
+      pushEstado(partial);
+    }
+    return merged;
+  }
+
+  function syncEstadoFromServer(){
+    var url = (config.workerUrl || "").trim();
+    if(!url) return;
+    fetch(url.replace(/\/$/, "") + "/estado?cuenta=" + encodeURIComponent(cuentaActual))
+      .then(function(res){ return res.ok ? res.json() : null; })
+      .then(function(body){
+        if(!body) return;
+        salaries = mergeYSincronizar(salaries, body.sueldos || {}, "sueldos");
+        modos = mergeYSincronizar(modos, body.modos || {}, "modos");
+        pagadas = mergeYSincronizar(pagadas, body.pagadas || {}, "pagadas");
+        feriadosExtra = mergeYSincronizar(feriadosExtra, body.feriadosExtra || {}, "feriadosExtra");
+        try{
+          localStorage.setItem(storageKey("planilla.sueldos"), JSON.stringify(salaries));
+          localStorage.setItem(storageKey("planilla.modoPago"), JSON.stringify(modos));
+          localStorage.setItem(storageKey("planilla.semanasPagadas"), JSON.stringify(pagadas));
+          localStorage.setItem("planilla.feriadosExtra", JSON.stringify(feriadosExtra));
+        }catch(e){}
+        renderFeriadosExtra();
+        renderCards(lastEntries);
+      })
+      .catch(function(){});
+  }
 
   var cuentasDisponibles = [{ id: "1", nombre: "Cuenta principal" }];
 
@@ -1265,6 +1320,7 @@
   }
 
   function load(){
+    syncEstadoFromServer();
     setBanner(null, "");
     showSkeleton();
     els.refreshIcon.classList.add("spin");
