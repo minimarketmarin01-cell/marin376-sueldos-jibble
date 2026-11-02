@@ -683,7 +683,10 @@
 (function(){
   "use strict";
 
-  var DEFAULTS = { workerUrl: "", extraRate: 4000, weeklyCap: 42 };
+  // URL del Worker precargada: cualquier celular nuevo que instale la app
+  // (desde el link o el APK) queda apuntando al mismo backend sin tener
+  // que configurarlo a mano. Se puede cambiar igual desde Configuracion.
+  var DEFAULTS = { workerUrl: "https://marin376-jibble-horas.minimarketmarin01.workers.dev", extraRate: 4000, weeklyCap: 42 };
 
   // La cuenta "1" (Marín 376, la original) usa las llaves de siempre, sin
   // sufijo, para no perder los datos ya guardados. Cuentas nuevas (otros
