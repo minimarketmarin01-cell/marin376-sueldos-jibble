@@ -699,7 +699,16 @@
       var raw = localStorage.getItem("planilla.config");
       if(!raw) return Object.assign({}, DEFAULTS);
       var parsed = JSON.parse(raw);
-      return Object.assign({}, DEFAULTS, parsed);
+      var cfg = Object.assign({}, DEFAULTS, parsed);
+      // Autocorrige un error comun: haber pegado el enlace de la app
+      // (para instalar) en el campo de la URL del Worker por error. Esa
+      // URL nunca puede ser una pagina de github.io, asi que se repara
+      // sola, sin que el usuario tenga que tocar nada.
+      if(cfg.workerUrl && cfg.workerUrl.indexOf("github.io") !== -1){
+        cfg.workerUrl = DEFAULTS.workerUrl;
+        saveConfig(cfg);
+      }
+      return cfg;
     }catch(e){ return Object.assign({}, DEFAULTS); }
   }
   function saveConfig(cfg){
