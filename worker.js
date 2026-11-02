@@ -35,6 +35,10 @@ function json(data, status = 200) {
   });
 }
 
+// Nombres por defecto de cada local (se pueden sobreescribir con el secret
+// JIBBLE_CUENTA_NOMBRE / JIBBLE_CUENTA_NOMBRE_2 si algun dia cambian).
+const NOMBRES_POR_DEFECTO = { "1": "Marín", "2": "Argomedo" };
+
 // Credenciales y config de una cuenta Jibble a partir de los secrets/vars
 // del Worker, usando el sufijo correspondiente (_2, _3, _4; "1" sin sufijo).
 function getCuentaConfig(env, cuenta) {
@@ -44,7 +48,7 @@ function getCuentaConfig(env, cuenta) {
     clientId: env[`JIBBLE_CLIENT_ID${suffix}`],
     clientSecret: env[`JIBBLE_CLIENT_SECRET${suffix}`],
     employeeNames: env[`JIBBLE_EMPLOYEE_NAMES${suffix}`] || "",
-    nombre: env[`JIBBLE_CUENTA_NOMBRE${suffix}`] || (suffix ? `Cuenta ${cuenta}` : "Cuenta principal"),
+    nombre: env[`JIBBLE_CUENTA_NOMBRE${suffix}`] || NOMBRES_POR_DEFECTO[cuenta || "1"] || `Cuenta ${cuenta}`,
   };
 }
 
