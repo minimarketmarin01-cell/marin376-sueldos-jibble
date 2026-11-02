@@ -625,6 +625,14 @@
   <summary>Configuración</summary>
   <div class="settings-body">
     <div class="field">
+      <label for="appLinkInput">Enlace de la app (para instalar en otro celular)</label>
+      <div class="feriado-add-row">
+        <input id="appLinkInput" type="text" readonly>
+        <button class="save-btn" id="copyAppLinkBtn" type="button">Copiar</button>
+      </div>
+      <span class="hint" id="copyAppLinkHint">Comparte este link: al abrirlo en el navegador del celular, puede agregarlo a inicio.</span>
+    </div>
+    <div class="field">
       <label for="cfgWorkerUrl">URL del Worker (Cloudflare)</label>
       <input id="cfgWorkerUrl" type="url" placeholder="https://marin376-jibble-horas.TU-SUBDOMINIO.workers.dev" autocomplete="off">
       <span class="hint">Se pide a esta URL: /horas-semana?from=YYYY-MM-DD&amp;to=YYYY-MM-DD</span>
@@ -904,6 +912,9 @@
     refreshBtn: document.getElementById("refreshBtn"),
     refreshIcon: document.getElementById("refreshIcon"),
     cfgWorkerUrl: document.getElementById("cfgWorkerUrl"),
+    appLinkInput: document.getElementById("appLinkInput"),
+    copyAppLinkBtn: document.getElementById("copyAppLinkBtn"),
+    copyAppLinkHint: document.getElementById("copyAppLinkHint"),
     cfgExtraRate: document.getElementById("cfgExtraRate"),
     cfgWeeklyCap: document.getElementById("cfgWeeklyCap"),
     saveSettingsBtn: document.getElementById("saveSettingsBtn"),
@@ -1091,6 +1102,28 @@
     els.feriadoNombre.value = "";
     renderFeriadosExtra();
     renderCards(lastEntries);
+  });
+
+  els.appLinkInput.value = location.origin + location.pathname;
+  els.copyAppLinkBtn.addEventListener("click", function(){
+    var link = els.appLinkInput.value;
+    var showCopied = function(){
+      els.copyAppLinkHint.textContent = "¡Copiado! Pégalo en WhatsApp u otra app para compartirlo.";
+      setTimeout(function(){
+        els.copyAppLinkHint.textContent = "Comparte este link: al abrirlo en el navegador del celular, puede agregarlo a inicio.";
+      }, 3000);
+    };
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(link).then(showCopied).catch(function(){
+        els.appLinkInput.select();
+        document.execCommand("copy");
+        showCopied();
+      });
+    }else{
+      els.appLinkInput.select();
+      document.execCommand("copy");
+      showCopied();
+    }
   });
 
   els.cfgWorkerUrl.value = config.workerUrl || "";
