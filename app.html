@@ -297,6 +297,13 @@
     margin-top: 2px;
     font-family: "IBM Plex Mono", monospace;
   }
+  .week-grid .day .x{
+    font-size: 10px;
+    font-weight: 600;
+    margin-top: 3px;
+    color: var(--warn);
+    font-family: "IBM Plex Mono", monospace;
+  }
   .week-grid .day.empty .h{ color: var(--ink-muted); font-weight: 400; }
   .week-grid .day.today{ background: var(--accent-soft); }
   .week-grid .day.today .h{ color: var(--accent-ink); }
@@ -632,6 +639,20 @@
       <label for="cfgWeeklyCap">Horas semanales normales (tope)</label>
       <input id="cfgWeeklyCap" type="number" inputmode="numeric" step="1">
     </div>
+    <div class="field">
+      <label for="cfgRestDay">Día de descanso (todo lo trabajado ese día es extra)</label>
+      <select id="cfgRestDay">
+        <option value="0">Lunes</option>
+        <option value="1">Martes</option>
+        <option value="2">Miércoles</option>
+        <option value="3">Jueves</option>
+        <option value="4">Viernes</option>
+        <option value="5">Sábado</option>
+        <option value="6">Domingo</option>
+        <option value="-1">Ninguno</option>
+      </select>
+      <span class="hint">Jornada normal por día = tope semanal / 6 (42 h = 7 h por día).</span>
+    </div>
     <button class="save-btn" id="saveSettingsBtn">Guardar y actualizar</button>
     <div class="field">
       <label for="jumpDate">Ir a una semana anterior</label>
@@ -673,7 +694,7 @@
   // URL del Worker precargada: cualquier celular nuevo que instale la app
   // (desde el link o el APK) queda apuntando al mismo backend sin tener
   // que configurarlo a mano. Se puede cambiar igual desde Configuracion.
-  var DEFAULTS = { workerUrl: "https://marin376-jibble-horas.minimarketmarin01.workers.dev", extraRate: 4000, weeklyCap: 42 };
+  var DEFAULTS = { workerUrl: "https://marin376-jibble-horas.minimarketmarin01.workers.dev", extraRate: 4000, weeklyCap: 42, restDay: 5 };
 
   // La cuenta "1" (Marín 376, la original) usa las llaves de siempre, sin
   // sufijo, para no perder los datos ya guardados. Cuentas nuevas (otros
@@ -916,6 +937,7 @@
     copyAppLinkHint: document.getElementById("copyAppLinkHint"),
     cfgExtraRate: document.getElementById("cfgExtraRate"),
     cfgWeeklyCap: document.getElementById("cfgWeeklyCap"),
+    cfgRestDay: document.getElementById("cfgRestDay"),
     saveSettingsBtn: document.getElementById("saveSettingsBtn"),
     settingsPanel: document.getElementById("settingsPanel"),
     jumpDate: document.getElementById("jumpDate"),
@@ -1128,6 +1150,7 @@
   els.cfgWorkerUrl.value = config.workerUrl || "";
   els.cfgExtraRate.value = config.extraRate;
   els.cfgWeeklyCap.value = config.weeklyCap;
+  els.cfgRestDay.value = String(config.restDay);
 
   function setBanner(kind, html){
     if(!kind){ els.banner.innerHTML = ""; return; }
@@ -1158,14 +1181,28 @@
     return { horas: horas, modo: modo, horasNormales: horasNormales, horasExtra: horasExtra, sueldoMensual: sueldoMensual, valorHora: valorHora, pagoNormal: pagoNormal, pagoExtra: pagoExtra, total: total };
   }
 
-  function renderWeekGrid(porDia){
+  // Reparte las horas de un dia entre normales y extra: la jornada diaria
+  // normal es tope/6 (42h -> 7h/dia, 6 dias); el dia de descanso todo es
+  // extra. En modo "porHora" no hay extra.
+  function splitDia(idx, horas, modo){
+    if(modo === "porHora") return { normal: horas, extra: 0 };
+    var cap = Number(config.weeklyCap) || 42;
+    var rest = Number(config.restDay);
+    var normalDia = (rest >= 0 && idx === rest) ? 0 : cap / 6;
+    var normal = Math.min(horas, normalDia);
+    return { normal: normal, extra: horas - normal };
+  }
+
+  function renderWeekGrid(porDia, modo){
     porDia = porDia || {};
-    return '<div class="week-grid">' + week.days.map(function(d){
+    return '<div class="week-grid">' + week.days.map(function(d, idx){
       var h = porDia[d.iso];
       var cls = "day" + (d.iso === todayIso ? " today" : "") + (h ? "" : " empty") + (esFeriado(d.iso) ? " feriado" : "");
       var val = h ? fmtHoras(h) : "–";
+      var extra = h ? splitDia(idx, h, modo).extra : 0;
+      var extraHtml = extra > 0.01 ? '<div class="x num">+' + fmtHoras(extra) + '</div>' : "";
       return '<button type="button" class="' + cls + '" data-fecha="' + d.iso + '"' + (h ? "" : " disabled") + '>' +
-        '<div class="d">' + d.label + ' <span class="num">' + d.numero + '</span></div><div class="h num">' + val + '</div></button>';
+        '<div class="d">' + d.label + ' <span class="num">' + d.numero + '</span></div><div class="h num">' + val + '</div>' + extraHtml + '</button>';
     }).join("") + '</div>';
   }
 
@@ -1225,19 +1262,26 @@
       var pctNormal = calc.horas > 0 ? Math.min(calc.horasNormales / cap, 1) * 100 : 0;
       var pctExtra = calc.horas > 0 ? (calc.horasExtra / cap) * 100 : 0;
 
-      var feriadosTrabajados = week.days.filter(function(d){
+      var feriadosTrabajados = week.days.map(function(d, idx){
+        return { iso: d.iso, idx: idx };
+      }).filter(function(d){
         return esFeriado(d.iso) && entry.porDia && entry.porDia[d.iso];
       });
       var feriadoBlock = "";
       if(feriadosTrabajados.length){
-        var horasFeriados = feriadosTrabajados.reduce(function(sum, d){ return sum + entry.porDia[d.iso]; }, 0);
-        var recargoFeriados = horasFeriados * calc.valorHora;
+        var horasNormalesFeriados = 0;
+        var detalleFeriados = feriadosTrabajados.map(function(d){
+          var h = entry.porDia[d.iso];
+          var s = splitDia(d.idx, h, calc.modo);
+          horasNormalesFeriados += s.normal;
+          return escapeHtml(nombreFeriado(d.iso)) + " (" + fmtHoras(h) +
+            (s.extra > 0.01 ? " = " + fmtHoras(s.normal) + " normales + " + fmtHoras(s.extra) + " extra" : "") + ")";
+        });
+        var recargoFeriados = horasNormalesFeriados * calc.valorHora;
         feriadoBlock =
           '<div class="feriado-note">' +
             '<strong>🎉 Trabajó feriado' + (feriadosTrabajados.length > 1 ? "s" : "") + ':</strong> ' +
-            feriadosTrabajados.map(function(d){
-              return escapeHtml(nombreFeriado(d.iso)) + " (" + fmtHoras(entry.porDia[d.iso]) + ")";
-            }).join(", ") + '. Recargo sugerido (100%, no obligatorio, no incluido en el total): <strong>' + fmtCLP(recargoFeriados) + '</strong>' +
+            detalleFeriados.join(", ") + '. Recargo 100% sobre las horas normales del feriado (no incluido en el total): <strong>' + fmtCLP(recargoFeriados) + '</strong>. Las horas extra de esos días van a ' + fmtCLP(Number(config.extraRate) || 0) + '/h.' +
           '</div>';
       }
 
@@ -1281,7 +1325,7 @@
           '</div>' +
           '<span class="hours-pill num">' + fmtHoras(calc.horas) + '</span>' +
         '</div>' +
-        renderWeekGrid(entry.porDia) +
+        renderWeekGrid(entry.porDia, calc.modo) +
         feriadoBlock +
         barBlock +
         '<div class="mode-row">' +
@@ -1413,6 +1457,7 @@
     config.workerUrl = els.cfgWorkerUrl.value.trim();
     config.extraRate = Number(els.cfgExtraRate.value) || 0;
     config.weeklyCap = Number(els.cfgWeeklyCap.value) || 42;
+    config.restDay = Number(els.cfgRestDay.value);
     saveConfig(config);
     els.settingsPanel.open = false;
     fetchCuentas();
