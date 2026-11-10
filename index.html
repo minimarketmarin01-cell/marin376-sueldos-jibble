@@ -363,6 +363,14 @@
     font-family: "IBM Plex Mono", monospace;
   }
 
+  .cash-row{ margin-top: 12px; margin-bottom: 6px; }
+  .split-line{
+    display:flex; justify-content: space-between; align-items: baseline;
+    font-size: 13px; color: var(--ink-muted);
+    padding: 0 2px; margin-bottom: 4px;
+  }
+  .split-line .v{ font-size: 15px; font-weight: 600; color: var(--ink); }
+
   .mode-row{
     display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
   }
@@ -783,6 +791,18 @@
     pushEstado({ pagadas: map });
   }
 
+  // "fecha|nombre" -> monto pagado en efectivo esa semana (el resto va por transferencia).
+  function loadEfectivo(){
+    try{
+      var raw = localStorage.getItem(storageKey("planilla.efectivo"));
+      return raw ? JSON.parse(raw) : {};
+    }catch(e){ return {}; }
+  }
+  function saveEfectivo(map){
+    try{ localStorage.setItem(storageKey("planilla.efectivo"), JSON.stringify(map)); }catch(e){}
+    pushEstado({ efectivo: map });
+  }
+
   var CLP = new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 });
   function fmtCLP(n){ return CLP.format(Math.round(n || 0)); }
   function fmtHoras(n){
@@ -972,7 +992,7 @@
   });
 
   var config = loadConfig();
-  var salaries, modos, pagadas;
+  var salaries, modos, pagadas, efectivo;
 
   // Los valores por defecto (sueldo/modo de Marlene) son del equipo de la
   // cuenta principal - no tendrian sentido para los trabajadores de otro
@@ -981,6 +1001,7 @@
     salaries = loadSalaries();
     modos = loadModos();
     pagadas = loadPagadas();
+    efectivo = loadEfectivo();
     if(cuentaActual === "1"){
       for(var defaultName in DEFAULT_SALARIES){
         if(!(defaultName in salaries)) salaries[defaultName] = DEFAULT_SALARIES[defaultName];
@@ -1016,11 +1037,13 @@
         salaries = mergeYSincronizar(salaries, body.sueldos || {}, "sueldos");
         modos = mergeYSincronizar(modos, body.modos || {}, "modos");
         pagadas = mergeYSincronizar(pagadas, body.pagadas || {}, "pagadas");
+        efectivo = mergeYSincronizar(efectivo, body.efectivo || {}, "efectivo");
         feriadosExtra = mergeYSincronizar(feriadosExtra, body.feriadosExtra || {}, "feriadosExtra");
         try{
           localStorage.setItem(storageKey("planilla.sueldos"), JSON.stringify(salaries));
           localStorage.setItem(storageKey("planilla.modoPago"), JSON.stringify(modos));
           localStorage.setItem(storageKey("planilla.semanasPagadas"), JSON.stringify(pagadas));
+          localStorage.setItem(storageKey("planilla.efectivo"), JSON.stringify(efectivo));
           localStorage.setItem("planilla.feriadosExtra", JSON.stringify(feriadosExtra));
         }catch(e){}
         renderFeriadosExtra();
@@ -1304,6 +1327,9 @@
       var paidId = "paid-" + safeId;
       var paidKey = week.from + "|" + entry.nombre;
       var isPaid = !!pagadas[paidKey];
+      var cashId = "cash-" + safeId;
+      var efectivoMonto = Number(efectivo[paidKey]) || 0;
+      var transferencia = Math.max(0, calc.total - efectivoMonto);
 
       var card = document.createElement("div");
       card.className = "card" + (isPaid ? " paid" : "");
@@ -1355,6 +1381,12 @@
         (calc.sueldoMensual > 0 ? '' : '<p class="empty-hint">Ingresa el sueldo mensual para calcular el pago.</p>') +
         breakdownBlock +
         '<div class="total-row"><span class="k">Total semana</span><span class="v num">' + fmtCLP(calc.total) + '</span></div>' +
+        '<div class="salary-row cash-row">' +
+          '<label for="' + cashId + '">Pagado en efectivo</label>' +
+          '<div class="input-wrap"><span>$</span><input id="' + cashId + '" type="text" inputmode="numeric" autocomplete="off" value="' + (efectivoMonto ? formatMiles(String(efectivoMonto)) : "") + '" placeholder="0"></div>' +
+        '</div>' +
+        '<div class="split-line"><span class="k">Por transferencia</span><span class="v num">' + fmtCLP(transferencia) + '</span></div>' +
+        (efectivoMonto > calc.total + 0.5 ? '<p class="empty-hint">El efectivo supera el total de la semana.</p>' : '') +
         '<div class="paid-row' + (isPaid ? " is-paid" : "") + '">' +
           '<input type="checkbox" id="' + paidId + '"' + (isPaid ? " checked" : "") + '>' +
           '<label for="' + paidId + '">' + (isPaid ? "✓ Semana pagada" : "Marcar semana como pagada") + '</label>' +
@@ -1382,6 +1414,16 @@
         renderCards(entries);
       });
 
+      var cashInput = card.querySelector("#" + CSS.escape(cashId));
+      cashInput.addEventListener("input", function(ev){
+        ev.target.value = formatMiles(ev.target.value.replace(/\D/g, ""));
+      });
+      cashInput.addEventListener("change", function(ev){
+        efectivo[paidKey] = parseMiles(ev.target.value);
+        saveEfectivo(efectivo);
+        renderCards(entries);
+      });
+
       card.querySelector("#" + CSS.escape(modeId)).addEventListener("change", function(ev){
         modos[entry.nombre] = ev.target.value;
         saveModos(modos);
@@ -1389,8 +1431,8 @@
       });
 
       card.querySelector("#" + CSS.escape(paidId)).addEventListener("change", function(ev){
-        if(ev.target.checked) pagadas[paidKey] = true;
-        else delete pagadas[paidKey];
+        // false (no delete) para que el desmarcado tambien se propague a los otros celulares.
+        pagadas[paidKey] = ev.target.checked;
         savePagadas(pagadas);
         renderCards(entries);
       });

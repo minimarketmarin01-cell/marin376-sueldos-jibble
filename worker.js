@@ -388,6 +388,7 @@ async function handleGetEstado(url, env) {
     sueldos: estado.sueldos || {},
     modos: estado.modos || {},
     pagadas: estado.pagadas || {},
+    efectivo: estado.efectivo || {},
     feriadosExtra: feriadosRaw ? JSON.parse(feriadosRaw) : {},
   };
 }
@@ -400,12 +401,13 @@ async function handlePutEstado(request, url, env) {
     await env.ESTADO.put("feriadosExtra", JSON.stringify(body.feriadosExtra));
   }
 
-  if (body.sueldos !== undefined || body.modos !== undefined || body.pagadas !== undefined) {
+  if (body.sueldos !== undefined || body.modos !== undefined || body.pagadas !== undefined || body.efectivo !== undefined) {
     const current = await env.ESTADO.get(`estado:${cuenta}`);
     const estado = current ? JSON.parse(current) : {};
     if (body.sueldos !== undefined) estado.sueldos = body.sueldos;
     if (body.modos !== undefined) estado.modos = body.modos;
     if (body.pagadas !== undefined) estado.pagadas = body.pagadas;
+    if (body.efectivo !== undefined) estado.efectivo = body.efectivo;
     await env.ESTADO.put(`estado:${cuenta}`, JSON.stringify(estado));
   }
 
